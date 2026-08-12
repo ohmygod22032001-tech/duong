@@ -2224,6 +2224,8 @@ function describeServerError(res) {
       return "Máy chủ đang bận xử lý request khác (quá nhiều thiết bị thao tác cùng lúc), vui lòng thử lại sau vài giây.";
     case "wrong_password":
       return "Sai mật khẩu.";
+    case "account_not_found":
+      return "Tài khoản này chưa tồn tại. Vui lòng đăng ký trước khi đăng nhập.";
     case "username_taken":
       return "Tên đăng nhập đã tồn tại.";
     case "exception":
@@ -2772,6 +2774,12 @@ function initAuthHandlers() {
       if (!res || !res.ok) {
         if (res && res.error === "wrong_password") {
           showAuthError("Mật khẩu không chính xác!");
+        } else if (res && res.error === "account_not_found") {
+          /* Tài khoản chưa từng được đăng ký trên máy chủ -> KHÔNG được
+             tự tạo tài khoản mới ở bước đăng nhập nữa (đây chính là lỗi
+             cũ khiến gõ sai tên đăng nhập vẫn "vào được"). Yêu cầu người
+             dùng bấm sang tab Đăng ký. */
+          showAuthError("Tài khoản này chưa tồn tại. Vui lòng bấm tab \"Đăng ký\" để tạo tài khoản mới!");
         } else {
           /* Không kết nối được máy chủ -> vẫn cho đăng nhập tạm bằng
              dữ liệu đã lưu trên máy này (nếu có), để không làm gián
