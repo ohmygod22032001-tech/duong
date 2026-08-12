@@ -1950,6 +1950,11 @@ function sanitizeState(s) {
   if (typeof s.colorJade !== "string") s.colorJade = "#388E3C";
   if (typeof s.bgImage !== "string") s.bgImage = "";
 
+  /* FIX: kho lưu tiến trình (Trúc, XP, streak, từ đã học...) RIÊNG cho
+     từng tài khoản (username), để tài khoản mới không bị "thừa kế"
+     Trúc/XP của tài khoản khác đã dùng chung trình duyệt trước đó. */
+  if (!s.studentProgress || typeof s.studentProgress !== "object") s.studentProgress = {};
+
   if (!s.gamification || typeof s.gamification !== "object") s.gamification = {};
   const g = s.gamification;
   if (typeof g.bambooPouch !== "number") g.bambooPouch = 0;
@@ -2019,6 +2024,44 @@ function sanitizeState(s) {
   return s;
 }
 
+/* --- FIX: tách riêng "tiến trình cá nhân" (Trúc, XP, streak, từ đã
+   học, badge...) theo TỪNG tài khoản (username), thay vì dùng chung
+   1 state cho mọi tài khoản trong cùng trình duyệt. Nhờ vậy tài
+   khoản mới tạo luôn khởi đầu đúng 0 Trúc / 0 XP, không bị dính
+   Trúc/XP của tài khoản khác đã đăng nhập trước đó trên máy này. --- */
+const PROGRESS_FIELDS = [
+  "gamification", "learned", "reviewWords", "dictationSubmissions",
+  "timedSubmissions", "timedBest", "streak", "lastStudyDate",
+  "challengeSeconds", "timedMinSplitCount"
+];
+
+function captureCurrentProgress() {
+  const p = {};
+  PROGRESS_FIELDS.forEach(f => { p[f] = state[f]; });
+  return p;
+}
+
+function applyProgressToState(p) {
+  PROGRESS_FIELDS.forEach(f => { state[f] = p ? p[f] : undefined; });
+}
+
+function switchToUserProgress(username) {
+  if (!username) return;
+  if (!state.studentProgress || typeof state.studentProgress !== "object") state.studentProgress = {};
+
+  if (state.studentProgress[username]) {
+    /* Tài khoản đã có tiến trình trước đó trên máy này -> nạp lại đúng
+       Trúc/XP/streak của chính tài khoản đó. */
+    applyProgressToState(state.studentProgress[username]);
+  } else {
+    /* Tài khoản HOÀN TOÀN MỚI -> xóa trắng rồi để sanitizeState() tự
+       điền giá trị mặc định (0 Trúc, 0 XP, chưa học từ nào...). */
+    PROGRESS_FIELDS.forEach(f => { state[f] = undefined; });
+    sanitizeState(state);
+    state.studentProgress[username] = captureCurrentProgress();
+  }
+}
+
 function loadState() {
   let loaded = null;
   try {
@@ -2029,6 +2072,10 @@ function loadState() {
 }
 
 function saveState() {
+  if (state.username) {
+    if (!state.studentProgress || typeof state.studentProgress !== "object") state.studentProgress = {};
+    state.studentProgress[state.username] = captureCurrentProgress();
+  }
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
 }
 
@@ -2361,6 +2408,7 @@ function loginSuccess(user) {
   state.username = user.username;
   state.studentName = user.displayName || user.username;
   state.role = user.role || "student";
+  switchToUserProgress(state.username);
   saveState();
   localStorage.setItem("zhVocabApp_current_user", JSON.stringify(user));
 
@@ -2383,6 +2431,7 @@ function checkAutoSession() {
       state.username = saved.username;
       state.studentName = saved.displayName || saved.username;
       state.role = saved.role || "student";
+      switchToUserProgress(state.username);
       saveState();
 
       document.getElementById("auth-overlay").style.display = "none";
