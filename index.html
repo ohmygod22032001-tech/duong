@@ -2004,13 +2004,14 @@ function sanitizeState(s) {
     g.badgesConfig = [];
   }
 
-  if (!Array.isArray(g.peers) || g.peers.length === 0) {
-    g.peers = [
-      { name: "Nguyễn Minh Anh", totalXp: 150, bambooPouch: 20, level: 2, outfit: "🌱 Gấu Mầm Trúc", decorations: ["shop_cherry"], badges: [] },
-      { name: "Trần Bảo Nam", totalXp: 320, bambooPouch: 45, level: 4, outfit: "🎒 Gấu Tân Binh", decorations: ["shop_house", "shop_lantern"], badges: ["quiz_t1", "dictation_t1"] },
-      { name: "Lê Hoàng Yến", totalXp: 210, bambooPouch: 30, level: 3, outfit: "🎒 Gấu Tân Binh", decorations: ["shop_koi"], badges: ["quiz_t1"] },
-      { name: "Phạm Quốc Bảo", totalXp: 90, bambooPouch: 10, level: 1, outfit: "🌱 Gấu Mầm Trúc", decorations: ["shop_golden_bamboo"], badges: [] }
-    ];
+  /* FIX: trước đây danh sách bạn học (peers) luôn khởi tạo với 4 tên giả
+     lập cố định, và chỉ tồn tại trong localStorage của từng máy — nên mỗi
+     thiết bị nhìn thấy 1 "vũ trụ" bảng xếp hạng khác nhau. Danh sách thật
+     giờ được lấy trực tiếp từ máy chủ (xem refreshServerRoster / serverRoster
+     bên dưới); mảng g.peers chỉ còn dùng làm bộ nhớ đệm cục bộ cho tính
+     năng Cướp/Tặng Trúc, nên khởi tạo rỗng thay vì dữ liệu giả. */
+  if (!Array.isArray(g.peers)) {
+    g.peers = [];
   }
   g.peers.forEach(p => {
     if (!Array.isArray(p.badges)) p.badges = [];
@@ -2180,6 +2181,125 @@ async function syncSharedConfigFromServer() {
   } else {
     _lastSharedConfigJson = null;
     pushSharedConfigToServer();
+  }
+}
+
+/* =========================================================
+   DANH SÁCH HỌC VIÊN "SỰ THẬT DUY NHẤT" (server roster)
+   ---------------------------------------------------------
+   Nguồn dữ liệu thật cho Bảng Xếp Hạng và các dropdown chọn học
+   viên trong CMS Giáo Viên. Được nạp từ action get_all_students
+   (đọc thẳng từ Sheet Accounts + Progress), nên MỌI thiết bị đăng
+   nhập bất kỳ tài khoản nào cũng thấy đúng 1 danh sách giống nhau.
+   ========================================================= */
+let serverRoster = [];         // [{username, displayName, role, totalXp, bambooPouch, unlockedBadges, decorations, badgeCharmBonus, spiritAnimal, streak}]
+let _rosterLastFetch = 0;
+
+async function refreshServerRoster() {
+  const res = await callServer("get_all_students", {});
+  if (res && res.ok && Array.isArray(res.students)) {
+    serverRoster = res.students;
+    _rosterLastFetch = Date.now();
+    syncPeersFromRoster();
+  }
+  return serverRoster;
+}
+
+/* Đổ dữ liệu roster thật vào g.peers (mảng cục bộ mà tính năng Cướp/Tặng
+   Trúc & Bảng Xếp Hạng cũ vẫn dùng), để không phải viết lại toàn bộ các
+   hàm đó — chỉ thay "nguồn sự thật" từ localStorage giả sang server thật. */
+function syncPeersFromRoster() {
+  const g = state.gamification;
+  if (!g) return;
+  if (!Array.isArray(g.peers)) g.peers = [];
+
+  serverRoster.forEach(s => {
+    if (s.role === "teacher") return;
+    if (state.username && String(s.username).toLowerCase() === String(state.username).toLowerCase()) return;
+    const lDetails = calcLevelDetails(s.totalXp || 0);
+    const lMeta = getLevelMetadata(lDetails.level);
+    const charm = calcPandaCharm(s.decorations || []) + (s.badgeCharmBonus || 0);
+
+    let p = g.peers.find(x => x.username === s.username);
+    if (!p) {
+      p = { username: s.username, name: s.displayName };
+      g.peers.push(p);
+    }
+    p.username = s.username;
+    p.name = s.displayName;
+    p.totalXp = s.totalXp || 0;
+    p.bambooPouch = s.bambooPouch || 0;
+    p.level = lDetails.level;
+    p.outfit = lMeta.outfit || lMeta.title;
+    p.badges = s.unlockedBadges || [];
+    p.decorations = s.decorations || [];
+    p.charm = charm;
+    p.spiritAnimal = s.spiritAnimal || "";
+  });
+
+  /* Bỏ các peer không còn tồn tại trên server (đã bị giáo viên xóa) */
+  const validUsernames = new Set(serverRoster.map(s => s.username));
+  g.peers = g.peers.filter(p => !p.username || validUsernames.has(p.username) || p.name === state.studentName);
+}
+
+/* =========================================================
+   ĐỒNG BỘ "GẦN REAL-TIME" GIỮA NHIỀU THIẾT BỊ
+   ---------------------------------------------------------
+   Trước đây dữ liệu chỉ được tải từ server đúng 1 lần lúc đăng
+   nhập/mở trang, nên nếu giáo viên sửa gì đó trên máy A, học viên
+   đang mở máy B sẽ không thấy cho tới khi họ F5. Vòng lặp dưới đây
+   định kỳ kéo lại cấu hình chung + danh sách học viên + tiến trình
+   của chính mình, và chỉ chạy khi tab đang mở (document.hidden =
+   false) để đỡ tốn quota Apps Script. ========================= */
+const LIVE_SYNC_INTERVAL_MS = 8000;
+let _liveSyncTimer = null;
+let _liveSyncVisHandlerAttached = false;
+
+function startLiveSync() {
+  stopLiveSync();
+  _liveSyncTimer = setInterval(pollLiveUpdates, LIVE_SYNC_INTERVAL_MS);
+  if (!_liveSyncVisHandlerAttached) {
+    document.addEventListener("visibilitychange", () => {
+      if (!document.hidden && state.username) pollLiveUpdates();
+    });
+    _liveSyncVisHandlerAttached = true;
+  }
+}
+
+function stopLiveSync() {
+  if (_liveSyncTimer) {
+    clearInterval(_liveSyncTimer);
+    _liveSyncTimer = null;
+  }
+}
+
+async function pollLiveUpdates() {
+  if (document.hidden || !state.username) return;
+  await Promise.all([
+    syncSharedConfigFromServer(),
+    refreshServerRoster(),
+    pollOwnProgressFromServer()
+  ]);
+
+  const activeView = document.querySelector("section.view.active");
+  const vId = activeView ? activeView.id : "";
+  if (vId === "view-leaderboard") renderLeaderboardContent();
+  if (vId === "view-teacher-lists") refreshTeacherRosterUI();
+  updateGamificationUI();
+}
+
+/* Nạp Trúc/XP/Huy hiệu mới nhất của CHÍNH MÌNH từ server (vd: giáo viên
+   vừa cộng Trúc / trao huy hiệu từ một thiết bị khác) — bỏ qua lượt này
+   nếu đang có thay đổi cục bộ chưa kịp đẩy lên máy chủ (pending debounce),
+   để tránh đè dữ liệu mới nhập bằng bản cũ hơn do độ trễ mạng. */
+async function pollOwnProgressFromServer() {
+  if (!state.username || _progressSyncTimer) return;
+  const res = await callServer("get_progress", { username: state.username });
+  if (res && res.ok && res.found && res.progress) {
+    applyProgressToState(res.progress);
+    sanitizeState(state);
+    state.studentProgress[state.username] = captureCurrentProgress();
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) {}
   }
 }
 
@@ -2542,6 +2662,7 @@ function initAuthHandlers() {
   if (logoutBtn) {
     logoutBtn.addEventListener("click", () => {
       if (!confirm("Bạn có chắc chắn muốn đăng xuất?")) return;
+      stopLiveSync();
       localStorage.removeItem("zhVocabApp_current_user");
       document.getElementById("auth-overlay").style.display = "flex";
       document.getElementById("class-selector-overlay").style.display = "none";
@@ -2555,6 +2676,7 @@ async function loginSuccess(user) {
   state.role = user.role || "student";
   switchToUserProgress(state.username);
   await syncProgressFromServer();
+  await refreshServerRoster();
   saveState();
   localStorage.setItem("zhVocabApp_current_user", JSON.stringify(user));
 
@@ -2568,6 +2690,8 @@ async function loginSuccess(user) {
   if (state.role === "teacher") {
     autoUnlockTeacherDashboard();
   }
+
+  startLiveSync();
 }
 
 async function checkAutoSession() {
@@ -2579,6 +2703,7 @@ async function checkAutoSession() {
       state.role = saved.role || "student";
       switchToUserProgress(state.username);
       await syncProgressFromServer();
+      await refreshServerRoster();
       saveState();
 
       document.getElementById("auth-overlay").style.display = "none";
@@ -2591,6 +2716,7 @@ async function checkAutoSession() {
         document.getElementById("class-selector-overlay").style.display = "flex";
         initClassSelector();
       }
+      startLiveSync();
       return;
     }
   } catch (e) {}
@@ -3270,6 +3396,7 @@ function openStealModal() {
   if (!modal) return;
   modal.style.display = "flex";
   renderStealModal();
+  refreshServerRoster().then(renderStealModal);
 }
 
 function renderStealModal() {
@@ -4585,6 +4712,9 @@ function initLeaderboardView() {
 
   modeSel.onchange = renderLeaderboardContent;
   renderLeaderboardContent();
+  /* Kéo ngay danh sách học viên mới nhất từ server khi mở Bảng Xếp Hạng,
+     không cần chờ tới vòng poll định kỳ tiếp theo. */
+  refreshServerRoster().then(renderLeaderboardContent);
 
   document.getElementById("reset-leaderboard-btn")?.addEventListener("click", () => {
     if (confirm("Bạn có chắc chắn muốn reset Bảng Xếp Hạng của lớp này?")) {
@@ -5089,15 +5219,46 @@ function initTeacherCMSHandlers() {
     alert("Lưu Tỷ lệ Thưởng Trúc thành công!");
   });
 
-  /* Grant / Deduct Bamboo */
-  document.getElementById("cms-execute-grant-btn")?.addEventListener("click", () => {
-    const sName = document.getElementById("cms-grant-student").value;
+  /* Grant / Deduct Bamboo — FIX: trước đây luôn cộng/trừ vào tài khoản
+     ĐANG ĐĂNG NHẬP (giáo viên) thay vì học viên được chọn trong dropdown.
+     Giờ gọi thẳng lên server để ghi đúng vào bản ghi của học viên đó, để
+     thay đổi hiển thị ngay trên MỌI thiết bị của học viên (qua vòng poll). */
+  document.getElementById("cms-execute-grant-btn")?.addEventListener("click", async (e) => {
+    const sel = document.getElementById("cms-grant-student");
+    const username = sel.value;
+    const displayName = sel.selectedOptions[0]?.textContent || username;
     const amount = parseInt(document.getElementById("cms-grant-amount").value) || 0;
     const reason = document.getElementById("cms-grant-reason").value.trim();
+    if (!username) return alert("Chưa có học viên nào trong danh sách để chọn!");
     if (!reason) return alert("Vui lòng nhập lý do cộng/trừ Trúc!");
 
-    grantBamboo(amount, reason);
-    alert(`Thao tác thành công cho ${sName}!`);
+    const btn = e.currentTarget;
+    const originalLabel = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = "Đang gửi lên máy chủ...";
+
+    const res = await callServer("grant_bamboo", { username, amount, reason });
+
+    btn.disabled = false;
+    btn.textContent = originalLabel;
+
+    if (!res || !res.ok) {
+      return alert("Không kết nối được máy chủ, vui lòng thử lại!");
+    }
+
+    /* Nếu giáo viên vô tình chọn đúng tài khoản đang đăng nhập trên máy
+       này thì cập nhật luôn UI tại chỗ cho khớp. */
+    if (state.username && state.username.toLowerCase() === username.toLowerCase()) {
+      state.gamification.bambooPouch = res.bambooPouch;
+      saveState();
+      updateGamificationUI();
+    }
+
+    await refreshServerRoster();
+    refreshTeacherRosterUI();
+    renderLeaderboardContent();
+
+    alert(`Thao tác thành công cho ${displayName}!`);
   });
 
   /* Badges CMS */
@@ -5116,9 +5277,51 @@ function initTeacherCMSHandlers() {
     alert(`Tạo huy hiệu mới thành công! (Cấp ${tier} · +${xp} XP, +${charm} 💖 Mị Lực)`);
   });
 
-  document.getElementById("cms-execute-award-badge-btn")?.addEventListener("click", () => {
+  /* Trao Huy Hiệu — FIX tương tự Cộng/Trừ Trúc ở trên: trước đây luôn
+     trao huy hiệu cho tài khoản đang đăng nhập, không dùng học viên chọn
+     trong dropdown "cms-award-student". Giờ ghi thẳng lên server đúng
+     bản ghi học viên đó. */
+  document.getElementById("cms-execute-award-badge-btn")?.addEventListener("click", async (e) => {
     const bId = document.getElementById("cms-award-badge-select").value;
-    awardBadge(bId);
+    const sel = document.getElementById("cms-award-student");
+    const username = sel.value;
+    const displayName = sel.selectedOptions[0]?.textContent || username;
+    if (!username) return alert("Chưa có học viên nào trong danh sách để chọn!");
+    const b = state.gamification.badgesConfig.find(x => x.id === bId);
+    if (!b) return alert("Chưa có huy hiệu nào để trao — hãy tạo huy hiệu trước!");
+
+    const btn = e.currentTarget;
+    const originalLabel = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = "Đang gửi lên máy chủ...";
+
+    const res = await callServer("award_badge", {
+      username, badgeId: bId, xp: b.xp || 0, charm: b.charm || 0,
+      badgeTitle: b.title, badgeIcon: b.icon
+    });
+
+    btn.disabled = false;
+    btn.textContent = originalLabel;
+
+    if (!res || !res.ok) {
+      return alert("Không kết nối được máy chủ, vui lòng thử lại!");
+    }
+    if (res.alreadyHad) {
+      alert(`${displayName} đã có huy hiệu này rồi!`);
+      return;
+    }
+
+    if (state.username && state.username.toLowerCase() === username.toLowerCase()) {
+      state.gamification.unlockedBadges = res.unlockedBadges;
+      state.gamification.totalXp = res.totalXp;
+      saveState();
+      updateGamificationUI();
+    }
+
+    await refreshServerRoster();
+    refreshTeacherRosterUI();
+    renderLeaderboardContent();
+
     alert("Trao huy hiệu thành công!");
   });
 
@@ -5453,31 +5656,22 @@ function renderTeacherCMS() {
   if (document.getElementById("rm-grammar")) document.getElementById("rm-grammar").value = rm.grammar || 20;
   if (document.getElementById("rm-streak")) document.getElementById("rm-streak").value = rm.streak || 30;
 
-  /* Grant Students Dropdown */
-  const grantSel = document.getElementById("cms-grant-student");
-  if (grantSel) {
-    grantSel.innerHTML = "";
-    (state.gamification?.peers || []).forEach(p => {
-      const o = document.createElement("option"); o.value = p.name; o.textContent = p.name;
-      grantSel.appendChild(o);
+  /* Award Badges Dropdown (danh sách huy hiệu — vẫn thuộc cấu hình cục bộ
+     của giáo viên, KHÔNG phải danh sách học viên nên giữ nguyên ở đây) */
+  const awardBadgesSel = document.getElementById("cms-award-badge-select");
+  if (awardBadgesSel) {
+    awardBadgesSel.innerHTML = "";
+    (state.gamification?.badgesConfig || []).forEach(b => {
+      const o = document.createElement("option"); o.value = b.id; o.textContent = `${b.icon} ${b.title}`;
+    awardBadgesSel.appendChild(o);
     });
   }
 
-  /* Award Badges Dropdown */
-  const awardBadgesSel = document.getElementById("cms-award-badge-select");
-  const awardStudentSel = document.getElementById("cms-award-student");
-  if (awardBadgesSel && awardStudentSel) {
-    awardBadgesSel.innerHTML = "";
-    awardStudentSel.innerHTML = "";
-    (state.gamification?.badgesConfig || []).forEach(b => {
-      const o = document.createElement("option"); o.value = b.id; o.textContent = `${b.icon} ${b.title}`;
-      awardBadgesSel.appendChild(o);
-    });
-    (state.gamification?.peers || []).forEach(p => {
-      const o = document.createElement("option"); o.value = p.name; o.textContent = p.name;
-      awardStudentSel.appendChild(o);
-    });
-  }
+  /* Dropdown học viên (Cộng/Trừ Trúc, Trao Huy Hiệu) + danh sách tài khoản:
+     lấy từ danh sách "sự thật duy nhất" trên server, và cũng tự tải lại
+     mỗi khi mở tab CMS này để tránh dữ liệu cũ. */
+  refreshTeacherRosterUI();
+  refreshServerRoster().then(refreshTeacherRosterUI);
 
   /* Topic CRUD Select */
   const tlTopicSel = document.getElementById("tl-topic-select");
@@ -5491,6 +5685,39 @@ function renderTeacherCMS() {
   renderGrammarTeacherManager();
   renderTeacherVideoManagerList();
   renderTeacherWordList();
+}
+
+/* Chỉ làm mới PHẦN phụ thuộc vào danh sách học viên trong CMS (2 dropdown
+   Cộng/Trừ Trúc + Trao Huy Hiệu, và bảng Quản Lý Tài Khoản Học Viên) —
+   tách riêng khỏi renderTeacherCMS() để có thể gọi lại định kỳ (poll) mà
+   KHÔNG reset các ô nhập liệu khác giáo viên đang gõ dở trên cùng tab. */
+function refreshTeacherRosterUI() {
+  const roster = (serverRoster.length ? serverRoster : []).filter(s => s.role !== "teacher");
+
+  const grantSel = document.getElementById("cms-grant-student");
+  if (grantSel) {
+    const prevVal = grantSel.value;
+    grantSel.innerHTML = "";
+    roster.forEach(s => {
+      const o = document.createElement("option");
+      o.value = s.username; o.textContent = s.displayName;
+      grantSel.appendChild(o);
+    });
+    if (roster.some(s => s.username === prevVal)) grantSel.value = prevVal;
+  }
+
+  const awardStudentSel = document.getElementById("cms-award-student");
+  if (awardStudentSel) {
+    const prevVal = awardStudentSel.value;
+    awardStudentSel.innerHTML = "";
+    roster.forEach(s => {
+      const o = document.createElement("option");
+      o.value = s.username; o.textContent = s.displayName;
+      awardStudentSel.appendChild(o);
+    });
+    if (roster.some(s => s.username === prevVal)) awardStudentSel.value = prevVal;
+  }
+
   renderTeacherStudentAccountManager();
 }
 
@@ -5502,33 +5729,31 @@ function renderTeacherStudentAccountManager() {
   const accs = getLocalAccounts();
   const studentMap = {};
 
-  // Gather registered accounts
-  Object.keys(accs).forEach(u => {
-    if (accs[u] && accs[u].role !== "teacher") {
-      studentMap[u] = {
-        username: u,
-        displayName: accs[u].displayName || u,
-        password: accs[u].password || "***",
-        fromAccounts: true
-      };
-    }
+  /* Nguồn chính: danh sách thật trên server (Accounts Sheet) — thấy được
+     học viên đăng ký từ BẤT KỲ thiết bị nào, không chỉ máy này. */
+  serverRoster.forEach(s => {
+    if (s.role === "teacher") return;
+    studentMap[s.username] = {
+      username: s.username,
+      displayName: s.displayName || s.username,
+      password: (accs[s.username] && accs[s.username].password) || "—",
+      fromAccounts: true
+    };
   });
 
-  // Gather peers in gamification
-  const peers = state.gamification?.peers || [];
-  peers.forEach(p => {
-    if (p && p.name) {
-      const existingKey = Object.keys(studentMap).find(k => studentMap[k].displayName === p.name || studentMap[k].username === p.name);
-      if (!existingKey) {
-        studentMap[p.name] = {
-          username: p.name,
-          displayName: p.name,
-          password: "N/A",
-          fromAccounts: false
+  /* Dự phòng khi mất mạng / chưa tải được roster: dùng cache cục bộ */
+  if (serverRoster.length === 0) {
+    Object.keys(accs).forEach(u => {
+      if (accs[u] && accs[u].role !== "teacher") {
+        studentMap[u] = {
+          username: u,
+          displayName: accs[u].displayName || u,
+          password: accs[u].password || "***",
+          fromAccounts: true
         };
       }
-    }
-  });
+    });
+  }
 
   const students = Object.values(studentMap);
   if (students.length === 0) {
