@@ -920,6 +920,11 @@
           <button class="btn btn-ok" id="ph-feed-one-btn" style="font-size:13px;">🍖 Cho Ăn 1 Trúc (+10 XP)</button>
           <button class="btn btn-primary" id="ph-feed-all-btn" style="font-size:13px;">🌿 Cho Ăn Tất Cả Trúc</button>
         </div>
+
+        <div style="display:flex; gap:8px; align-items:center; margin-top:10px;">
+          <input type="number" id="ph-feed-custom-input" min="1" step="1" placeholder="Số Trúc..." style="flex:1; padding:8px 12px; border-radius:12px; border:2px solid var(--paper-darker); font-weight:800; font-size:13px; background:var(--card-bg); color:var(--ink); min-width:0;">
+          <button class="btn btn-primary" id="ph-feed-custom-btn" style="font-size:13px; white-space:nowrap;">🎋 Cho Ăn Tuỳ Chọn</button>
+        </div>
       </div>
 
       <!-- Badges Grid -->
@@ -2287,6 +2292,16 @@ async function syncSharedConfigFromServer() {
     applySharedConfig(res.config);
     sanitizeState(state);
     _lastSharedConfigJson = JSON.stringify(captureSharedConfig());
+    /* FIX: trước đây chỉ cập nhật `state` mà KHÔNG vẽ lại giao diện, nên
+       nếu thiết bị này từng lưu cache cũ (tiêu đề, màu sắc...) trong
+       localStorage, applyCustomTheme() lúc DOMContentLoaded đã vẽ giao
+       diện CŨ trước khi đoạn này chạy xong — và sau khi chạy xong cũng
+       không ai gọi lại applyCustomTheme() để vẽ đè bằng cấu hình MỚI từ
+       server. Kết quả: mỗi thiết bị kẹt lại đúng giao diện lần cuối nó
+       từng thấy. Gọi lại applyCustomTheme() ở đây để giao diện luôn được
+       vẽ lại theo đúng bản mới nhất trên server, kể cả khi gọi định kỳ
+       từ pollLiveUpdates(). */
+    applyCustomTheme();
     saveState();
   } else {
     _lastSharedConfigJson = null;
@@ -5724,8 +5739,9 @@ function renderTeacherCMS() {
       row.style.cssText = "display:flex; justify-content:space-between; align-items:center; background:var(--paper); padding:10px 14px; border-radius:12px; border:2px solid var(--paper-darker);";
       row.innerHTML = `
         <div><strong>🏫 ${cName}</strong> (Mật khẩu: <code>${state.classes[cName].password}</code>)</div>
-        <div style="display:flex; gap:8px;">
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">
           <button class="btn btn-outline select-class-btn" data-name="${cName}" style="font-size:11px; padding:4px 8px;">Quản lý lớp này</button>
+          <button class="btn btn-outline rename-class-btn" data-name="${cName}" style="font-size:11px; padding:4px 8px;">✏️ Sửa tên</button>
           ${Object.keys(state.classes).length > 1 ? `<button class="btn btn-bad del-class-btn" data-name="${cName}" style="font-size:11px; padding:4px 8px;">Xóa</button>` : ''}
         </div>
       `;
@@ -5737,6 +5753,58 @@ function renderTeacherCMS() {
         enterClass(btn.dataset.name);
         renderTeacherCMS();
         alert(`Đã chuyển sang lớp: ${btn.dataset.name}`);
+      };
+    });
+
+    cListWrap.querySelectorAll(".rename-class-btn").forEach(btn => {
+      btn.onclick = () => {
+        const oldName = btn.dataset.name;
+        const newName = prompt(`Nhập tên mới cho lớp "${oldName}":`, oldName);
+        if (newName === null) return;
+        const trimmed = newName.trim();
+        if (!trimmed) {
+          alert("Tên lớp không được để trống!");
+          return;
+        }
+        if (trimmed === oldName) return;
+        if (state.classes[trimmed]) {
+          alert(`Lớp "${trimmed}" đã tồn tại rồi! Hãy chọn tên khác nhé.`);
+          return;
+        }
+        if (!confirm(`Đổi tên lớp "${oldName}" thành "${trimmed}"?\n\nLưu ý: học viên đã tham gia lớp này sẽ cần đăng nhập lại và chọn lại lớp theo tên mới (mật khẩu giữ nguyên).`)) return;
+
+        /* Giữ nguyên toàn bộ dữ liệu của lớp (từ vựng, mật khẩu, cấu hình...),
+           chỉ đổi key tên lớp trong state.classes. Vì "classes" nằm trong
+           SHARED_FIELDS, việc đổi tên sẽ tự động đồng bộ tới mọi thiết bị
+           qua saveState() -> pushSharedConfigToServer(). */
+        const newClasses = {};
+        Object.keys(state.classes).forEach(k => {
+          if (k === oldName) {
+            newClasses[trimmed] = state.classes[k];
+          } else {
+            newClasses[k] = state.classes[k];
+          }
+        });
+        state.classes = newClasses;
+
+        /* Chuyển các dữ liệu phụ (bài nộp kiểm tra thời gian, chính tả...)
+           vốn được lưu theo key = tên lớp, sang tên mới để không bị mất. */
+        if (state.timedSubmissions && state.timedSubmissions[oldName] !== undefined) {
+          state.timedSubmissions[trimmed] = state.timedSubmissions[oldName];
+          delete state.timedSubmissions[oldName];
+        }
+        if (state.dictationSubmissions && state.dictationSubmissions[oldName] !== undefined) {
+          state.dictationSubmissions[trimmed] = state.dictationSubmissions[oldName];
+          delete state.dictationSubmissions[oldName];
+        }
+
+        if (state.currentClassName === oldName) {
+          state.currentClassName = trimmed;
+        }
+
+        saveState();
+        renderTeacherCMS();
+        alert(`Đã đổi tên lớp thành "${trimmed}"!`);
       };
     });
 
@@ -6022,9 +6090,23 @@ function renameStudentAccount(username, currentDisplayName) {
     if (nameEl) nameEl.textContent = trimmedNewName;
   }
 
-  // 3b. Đồng bộ tên hiển thị mới lên máy chủ (Google Sheet)
-  if (accs[username]) {
-    callServer("update_account_name", { username, displayName: trimmedNewName });
+  // 3b. Đồng bộ tên hiển thị mới lên máy chủ (Supabase)
+  /* FIX: trước đây chỉ gọi callServer() khi accs[username] tồn tại — tức
+     tài khoản đó phải từng đăng nhập/đăng ký NGAY TRÊN THIẾT BỊ của giáo
+     viên thì mới có mặt trong accs (localStorage cục bộ). Nhưng danh sách
+     học viên hiển thị ở đây lấy từ serverRoster (Supabase) — gồm cả những
+     em đăng ký từ thiết bị khác, nên hầu hết KHÔNG có trong accs của máy
+     giáo viên. Điều kiện cũ khiến nút "Đổi Tên" gần như luôn bỏ qua bước
+     gọi server, chỉ đổi tạm trên giao diện rồi mất khi tải lại trang.
+     Giờ luôn gọi server (Supabase là nguồn dữ liệu thật), miễn có username. */
+  if (username) {
+    callServer("update_account_name", { username, displayName: trimmedNewName }).then(res => {
+      if (!res || !res.ok) {
+        showToast("⚠️ Đổi tên trên máy chủ thất bại: " + describeServerError(res), "error");
+      } else {
+        refreshServerRoster().then(() => refreshTeacherRosterUI());
+      }
+    });
   }
 
   // 4. Update submissions
@@ -6400,6 +6482,22 @@ window.addEventListener("DOMContentLoaded", () => {
   });
   document.getElementById("ph-feed-all-btn")?.addEventListener("click", () => {
     feedPanda(state.gamification?.bambooPouch || 0);
+  });
+  document.getElementById("ph-feed-custom-btn")?.addEventListener("click", () => {
+    const inputEl = document.getElementById("ph-feed-custom-input");
+    const raw = inputEl?.value;
+    const amount = parseInt(raw, 10);
+    if (!raw || isNaN(amount) || amount <= 0) {
+      alert("Vui lòng nhập một số Trúc hợp lệ (lớn hơn 0) nhé 🎋");
+      return;
+    }
+    const pouch = state.gamification?.bambooPouch || 0;
+    if (amount > pouch) {
+      alert(`Bạn chỉ có ${pouch} Cành Trúc trong túi thôi! Hãy nhập số nhỏ hơn hoặc bằng ${pouch} nhé 🎋`);
+      return;
+    }
+    feedPanda(amount);
+    if (inputEl) inputEl.value = "";
   });
 
   /* Shop, Gift & Steal Modals */
