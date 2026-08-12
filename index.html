@@ -1383,7 +1383,7 @@
 
 const STORAGE_KEY = "zhVocabApp_multiclass_panda_v7";
 var state = null;
-const ANSWER_SHEET_ENDPOINT = "https://script.google.com/macros/s/AKfycbzY5BP-DJO68RkKh1xh3aH20GZtBTryNlA25qwaa6C0Chf-bI4xrAqE7F3yyQVQE_dswQ/exec";
+const ANSWER_SHEET_ENDPOINT = "https://script.google.com/macros/s/AKfycbzdy_PfwSuUQlG93nJzwsMFRQlOdGQiOV8BF9XI81Heuog7AAHPPrSzBj2-CtqCb_kM/exec";
 const TEACHER_ZALO_PHONE = "0985381914";
 
 /* Default Vocabulary */
@@ -2075,8 +2075,57 @@ function saveState() {
   if (state.username) {
     if (!state.studentProgress || typeof state.studentProgress !== "object") state.studentProgress = {};
     state.studentProgress[state.username] = captureCurrentProgress();
+    pushProgressToServer();
   }
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+}
+
+/* =========================================================
+   ĐỒNG BỘ TÀI KHOẢN & TIẾN TRÌNH QUA GOOGLE APPS SCRIPT
+   (dùng chung ANSWER_SHEET_ENDPOINT, mở rộng thêm các action:
+   login_account, register_account, get_progress, save_progress)
+   ========================================================= */
+function callServer(action, data = {}) {
+  return fetch(ANSWER_SHEET_ENDPOINT, {
+    method: "POST",
+    headers: { "Content-Type": "text/plain;charset=utf-8" },
+    body: JSON.stringify({ action, ...data })
+  })
+    .then(r => r.json())
+    .catch(err => {
+      console.error("Lỗi kết nối máy chủ:", err);
+      return { ok: false, error: "network" };
+    });
+}
+
+let _progressSyncTimer = null;
+function pushProgressToServer() {
+  if (!state.username) return;
+  clearTimeout(_progressSyncTimer);
+  _progressSyncTimer = setTimeout(() => {
+    callServer("save_progress", {
+      username: state.username,
+      progress: captureCurrentProgress()
+    });
+  }, 1500);
+}
+
+/* Lấy tiến trình mới nhất từ server. Nếu server đã có dữ liệu (vì học
+   sinh từng học trên thiết bị khác) -> nạp đè lên state hiện tại.
+   Nếu server chưa có -> đẩy tiến trình local hiện tại lên server. */
+async function syncProgressFromServer() {
+  if (!state.username) return;
+  const res = await callServer("get_progress", { username: state.username });
+  if (res && res.ok && res.found && res.progress) {
+    applyProgressToState(res.progress);
+    sanitizeState(state);
+    state.studentProgress[state.username] = captureCurrentProgress();
+  } else {
+    callServer("save_progress", {
+      username: state.username,
+      progress: captureCurrentProgress()
+    });
+  }
 }
 
 function showToast(message, type = "success") {
@@ -2355,28 +2404,52 @@ function initAuthHandlers() {
   }
 
   if (loginBtn) {
-    loginBtn.addEventListener("click", () => {
+    loginBtn.addEventListener("click", async () => {
       clearAuthError();
       const u = document.getElementById("auth-login-username").value.trim().toLowerCase();
       const p = document.getElementById("auth-login-password").value;
       if (!u || !p) return showAuthError("Vui lòng nhập tên đăng nhập và mật khẩu!");
 
-      const accs = getLocalAccounts();
-      if (accs[u] && accs[u].password === p) {
-        loginSuccess(accs[u]);
-      } else if (!accs[u]) {
-        const newAcc = { username: u, displayName: u, password: p, role: u === "teacher" ? "teacher" : "student" };
-        accs[u] = newAcc;
-        saveLocalAccounts(accs);
-        loginSuccess(newAcc);
-      } else {
-        showAuthError("Mật khẩu không chính xác!");
+      const originalLabel = loginBtn.textContent;
+      loginBtn.disabled = true;
+      loginBtn.textContent = "Đang kết nối máy chủ...";
+
+      const res = await callServer("login_account", {
+        username: u,
+        password: p,
+        role: u === "teacher" ? "teacher" : "student"
+      });
+
+      loginBtn.disabled = false;
+      loginBtn.textContent = originalLabel;
+
+      if (!res || !res.ok) {
+        if (res && res.error === "wrong_password") {
+          showAuthError("Mật khẩu không chính xác!");
+        } else {
+          /* Không kết nối được máy chủ -> vẫn cho đăng nhập tạm bằng
+             dữ liệu đã lưu trên máy này (nếu có), để không làm gián
+             đoạn buổi học; tiến trình sẽ tự đồng bộ lại khi có mạng. */
+          const accs = getLocalAccounts();
+          if (accs[u] && accs[u].password === p) {
+            showAuthError("Không kết nối được máy chủ, đang dùng dữ liệu ngoại tuyến trên máy này.");
+            await loginSuccess(accs[u]);
+          } else {
+            showAuthError("Không kết nối được máy chủ. Vui lòng kiểm tra mạng và thử lại!");
+          }
+        }
+        return;
       }
+
+      const accs = getLocalAccounts();
+      accs[u] = res.account;
+      saveLocalAccounts(accs);
+      await loginSuccess(res.account);
     });
   }
 
   if (regBtn) {
-    regBtn.addEventListener("click", () => {
+    regBtn.addEventListener("click", async () => {
       clearAuthError();
       const u = document.getElementById("auth-reg-username").value.trim().toLowerCase();
       const d = document.getElementById("auth-reg-displayname").value.trim();
@@ -2384,13 +2457,30 @@ function initAuthHandlers() {
       if (!u || !d || !p) return showAuthError("Vui lòng nhập đầy đủ thông tin đăng ký!");
       if (p.length < 3) return showAuthError("Mật khẩu cần tối thiểu 3 ký tự!");
 
-      const accs = getLocalAccounts();
-      if (accs[u]) return showAuthError("Tên đăng nhập đã tồn tại! Vui lòng chọn tên khác hoặc đăng nhập.");
+      const originalLabel = regBtn.textContent;
+      regBtn.disabled = true;
+      regBtn.textContent = "Đang tạo tài khoản...";
 
-      const newAcc = { username: u, displayName: d, password: p, role: "student" };
-      accs[u] = newAcc;
+      const res = await callServer("register_account", {
+        username: u, displayName: d, password: p, role: "student"
+      });
+
+      regBtn.disabled = false;
+      regBtn.textContent = originalLabel;
+
+      if (!res || !res.ok) {
+        if (res && res.error === "username_taken") {
+          showAuthError("Tên đăng nhập đã tồn tại! Vui lòng chọn tên khác hoặc đăng nhập.");
+        } else {
+          showAuthError("Không kết nối được máy chủ. Vui lòng kiểm tra mạng và thử lại!");
+        }
+        return;
+      }
+
+      const accs = getLocalAccounts();
+      accs[u] = res.account;
       saveLocalAccounts(accs);
-      loginSuccess(newAcc);
+      await loginSuccess(res.account);
     });
   }
 
@@ -2404,11 +2494,12 @@ function initAuthHandlers() {
   }
 }
 
-function loginSuccess(user) {
+async function loginSuccess(user) {
   state.username = user.username;
   state.studentName = user.displayName || user.username;
   state.role = user.role || "student";
   switchToUserProgress(state.username);
+  await syncProgressFromServer();
   saveState();
   localStorage.setItem("zhVocabApp_current_user", JSON.stringify(user));
 
@@ -2424,7 +2515,7 @@ function loginSuccess(user) {
   }
 }
 
-function checkAutoSession() {
+async function checkAutoSession() {
   try {
     const saved = JSON.parse(localStorage.getItem("zhVocabApp_current_user"));
     if (saved && saved.username) {
@@ -2432,6 +2523,7 @@ function checkAutoSession() {
       state.studentName = saved.displayName || saved.username;
       state.role = saved.role || "student";
       switchToUserProgress(state.username);
+      await syncProgressFromServer();
       saveState();
 
       document.getElementById("auth-overlay").style.display = "none";
@@ -5467,6 +5559,11 @@ function renameStudentAccount(username, currentDisplayName) {
     if (nameEl) nameEl.textContent = trimmedNewName;
   }
 
+  // 3b. Đồng bộ tên hiển thị mới lên máy chủ (Google Sheet)
+  if (accs[username]) {
+    callServer("update_account_name", { username, displayName: trimmedNewName });
+  }
+
   // 4. Update submissions
   if (state.dictationSubmissions) {
     Object.keys(state.dictationSubmissions).forEach(c => {
@@ -5519,6 +5616,7 @@ function deleteStudentAccount(username, displayName) {
     }
   });
   saveLocalAccounts(accs);
+  callServer("delete_account", { username });
 
   // 2. Delete from gamification peers
   if (state.gamification && Array.isArray(state.gamification.peers)) {
