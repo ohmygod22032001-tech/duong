@@ -2077,6 +2077,7 @@ function saveState() {
     state.studentProgress[state.username] = captureCurrentProgress();
     pushProgressToServer();
   }
+  pushSharedConfigToServer();
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
 }
 
@@ -2125,6 +2126,60 @@ async function syncProgressFromServer() {
       username: state.username,
       progress: captureCurrentProgress()
     });
+  }
+}
+
+/* =========================================================
+   ĐỒNG BỘ "CẤU HÌNH CHUNG" (lớp học, từ vựng, video, ngữ pháp,
+   màu sắc giao diện...) — dữ liệu này KHÔNG thuộc riêng 1 học
+   viên nào, mà phải giống nhau trên MỌI thiết bị. Trước đây
+   phần này chỉ nằm trong localStorage của từng máy nên mỗi
+   thiết bị thấy một giao diện/lớp học khác nhau. */
+const SHARED_FIELDS = ["classes", "customTitle", "colorPaper", "colorInk", "colorJade", "bgImage"];
+
+function captureSharedConfig() {
+  const c = {};
+  SHARED_FIELDS.forEach(f => { c[f] = state[f]; });
+  return c;
+}
+
+function applySharedConfig(c) {
+  if (!c) return;
+  SHARED_FIELDS.forEach(f => {
+    if (c[f] !== undefined) state[f] = c[f];
+  });
+}
+
+let _lastSharedConfigJson = null;
+let _sharedConfigSyncTimer = null;
+function pushSharedConfigToServer() {
+  /* Chỉ đẩy lên server khi cấu hình chung THỰC SỰ thay đổi (giáo viên
+     thêm/sửa lớp, từ vựng, màu sắc...). Tránh việc mỗi lần học sinh
+     làm bài (saveState chạy liên tục) lại ghi đè cấu hình chung bằng
+     bản cũ đang có trên máy của học sinh đó. */
+  const currentJson = JSON.stringify(captureSharedConfig());
+  if (currentJson === _lastSharedConfigJson) return;
+  clearTimeout(_sharedConfigSyncTimer);
+  _sharedConfigSyncTimer = setTimeout(() => {
+    _lastSharedConfigJson = currentJson;
+    callServer("save_shared_config", { config: JSON.parse(currentJson) });
+  }, 1500);
+}
+
+/* Gọi 1 lần khi app khởi động: nếu server đã có cấu hình chung (do
+   thiết bị khác từng lưu) -> nạp đè lên state hiện tại để mọi thiết
+   bị đồng nhất. Nếu server chưa có gì -> đẩy cấu hình hiện tại lên
+   làm bản gốc dùng chung. */
+async function syncSharedConfigFromServer() {
+  const res = await callServer("get_shared_config", {});
+  if (res && res.ok && res.found && res.config) {
+    applySharedConfig(res.config);
+    sanitizeState(state);
+    _lastSharedConfigJson = JSON.stringify(captureSharedConfig());
+    saveState();
+  } else {
+    _lastSharedConfigJson = null;
+    pushSharedConfigToServer();
   }
 }
 
@@ -5997,8 +6052,11 @@ window.addEventListener("DOMContentLoaded", () => {
     document.body.classList.toggle("theme-dark");
   });
 
-  checkAutoSession();
-  updateGamificationUI();
+  (async () => {
+    await syncSharedConfigFromServer();
+    await checkAutoSession();
+    updateGamificationUI();
+  })();
 });
 
 </script>
