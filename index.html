@@ -1952,8 +1952,8 @@ function sanitizeState(s) {
 
   if (!s.gamification || typeof s.gamification !== "object") s.gamification = {};
   const g = s.gamification;
-  if (typeof g.bambooPouch !== "number") g.bambooPouch = 20;
-  if (typeof g.totalXp !== "number") g.totalXp = 150;
+  if (typeof g.bambooPouch !== "number") g.bambooPouch = 0;
+  if (typeof g.totalXp !== "number") g.totalXp = 0;
   if (!Array.isArray(g.unlockedBadges)) g.unlockedBadges = [];
   if (!Array.isArray(g.decorations)) g.decorations = [];
   if (typeof g.badgeCharmBonus !== "number") g.badgeCharmBonus = 0;
