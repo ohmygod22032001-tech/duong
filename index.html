@@ -3,7 +3,25 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<!-- FIX: chống trình duyệt lưu cache trang HTML này, để mọi thiết bị
+     luôn tải bản mới nhất thay vì bản cũ đã lưu trong bộ nhớ đệm. -->
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
 <title id="page-title-tag">🐼 雅趣学堂 · WEB TỪ VỰNG CỦA THẦY MARCUS 🎋</title>
+<script>
+  /* FIX: khi người dùng quay lại trang (vuốt back/forward, hoặc mở lại
+     tab trên điện thoại), nhiều trình duyệt (đặc biệt Safari/Chrome trên
+     mobile) không tải lại trang mà chỉ khôi phục đúng bản chụp cũ trong
+     bộ nhớ (bfcache) — kể cả khi dữ liệu trên server đã thay đổi. Bắt
+     sự kiện "pageshow" với persisted=true để ép tải lại trang mới nhất
+     trong trường hợp này. */
+  window.addEventListener("pageshow", function (evt) {
+    if (evt.persisted) {
+      window.location.reload();
+    }
+  });
+</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Quicksand:wght@500;600;700;800&family=Baloo+2:wght@600;700;800&family=Noto+Serif+SC:wght@500;700;900&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
@@ -2268,6 +2286,16 @@ function applySharedConfig(c) {
 
 let _lastSharedConfigJson = null;
 let _sharedConfigSyncTimer = null;
+/* FIX: trước đây khi giáo viên xóa lớp (hoặc đổi tên, đổi màu...), app xóa
+   cục bộ rồi đợi 1.5s mới đẩy lên server (debounce). Nhưng vòng đồng bộ
+   định kỳ pollLiveUpdates() chạy mỗi 8 giây lại KHÔNG biết là đang có thay
+   đổi cục bộ chưa kịp lưu — nó cứ kéo bản CŨ trên server về và ghi đè state,
+   khiến lớp vừa xóa "hồi sinh" trở lại (hoặc đổi tên/màu bị hoàn tác). Cờ
+   dưới đây bật lên ngay khi có thay đổi chờ đẩy lên, và chỉ tắt khi server
+   đã xác nhận lưu xong, để syncSharedConfigFromServer() biết mà bỏ qua lượt
+   kéo dữ liệu trong lúc đó — giống cơ chế `_progressSyncTimer` đã dùng cho
+   tiến trình học viên. */
+let _sharedConfigPushPending = false;
 function pushSharedConfigToServer() {
   /* Chỉ đẩy lên server khi cấu hình chung THỰC SỰ thay đổi (giáo viên
      thêm/sửa lớp, từ vựng, màu sắc...). Tránh việc mỗi lần học sinh
@@ -2276,9 +2304,11 @@ function pushSharedConfigToServer() {
   const currentJson = JSON.stringify(captureSharedConfig());
   if (currentJson === _lastSharedConfigJson) return;
   clearTimeout(_sharedConfigSyncTimer);
+  _sharedConfigPushPending = true;
   _sharedConfigSyncTimer = setTimeout(() => {
     _lastSharedConfigJson = currentJson;
-    callServer("save_shared_config", { config: JSON.parse(currentJson) });
+    callServer("save_shared_config", { config: JSON.parse(currentJson) })
+      .finally(() => { _sharedConfigPushPending = false; });
   }, 1500);
 }
 
@@ -2287,6 +2317,11 @@ function pushSharedConfigToServer() {
    bị đồng nhất. Nếu server chưa có gì -> đẩy cấu hình hiện tại lên
    làm bản gốc dùng chung. */
 async function syncSharedConfigFromServer() {
+  /* Đang có thay đổi cục bộ (xóa/sửa lớp, đổi màu...) chưa kịp đẩy xong lên
+     server -> bỏ qua lượt kéo dữ liệu này, tránh ghi đè mất thay đổi vừa
+     làm bằng bản cũ hơn đang còn trên server (xem comment ở
+     _sharedConfigPushPending phía trên). */
+  if (_sharedConfigPushPending) return;
   const res = await callServer("get_shared_config", {});
   if (res && res.ok && res.found && res.config) {
     applySharedConfig(res.config);
