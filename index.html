@@ -1383,7 +1383,7 @@
 
 const STORAGE_KEY = "zhVocabApp_multiclass_panda_v7";
 var state = null;
-const ANSWER_SHEET_ENDPOINT = "https://script.google.com/macros/s/AKfycbzdy_PfwSuUQlG93nJzwsMFRQlOdGQiOV8BF9XI81Heuog7AAHPPrSzBj2-CtqCb_kM/exec";
+const ANSWER_SHEET_ENDPOINT = "https://script.google.com/macros/s/AKfycbzQYTWaCofpFBH7f1SoIqJzS6cmOFZH7kZj6z9Ca0BvkGTmtHjxi-OdMteMLGlMHVBT/exec";
 const TEACHER_ZALO_PHONE = "0985381914";
 
 /* Default Vocabulary */
@@ -2087,17 +2087,71 @@ function saveState() {
    (dùng chung ANSWER_SHEET_ENDPOINT, mở rộng thêm các action:
    login_account, register_account, get_progress, save_progress)
    ========================================================= */
-function callServer(action, data = {}) {
-  return fetch(ANSWER_SHEET_ENDPOINT, {
+/* FIX: trước đây callServer() gọi thẳng r.json() — nếu Apps Script trả về
+   một trang HTML lỗi (do quá tải, do exception chưa được bắt ở server...)
+   thay vì JSON, r.json() sẽ throw và bị catch nhầm thành "network", khiến
+   app báo sai là "mất mạng" dù server chỉ đang gặp sự cố thoáng qua.
+   Giờ đọc response dạng TEXT trước, cố gắng parse JSON, và nếu thất bại
+   thì log rõ nội dung thô nhận được (để chẩn đoán được lỗi thật) + TỰ ĐỘNG
+   THỬ LẠI 1 LẦN trước khi báo lỗi cho người dùng — hầu hết các trục trặc
+   do nghẽn tải tạm thời (nhiều thiết bị cùng gọi lên script) sẽ tự khỏi
+   ngay ở lần thử thứ 2. */
+async function callServerOnce_(action, data) {
+  const r = await fetch(ANSWER_SHEET_ENDPOINT, {
     method: "POST",
     headers: { "Content-Type": "text/plain;charset=utf-8" },
     body: JSON.stringify({ action, ...data })
-  })
-    .then(r => r.json())
-    .catch(err => {
-      console.error("Lỗi kết nối máy chủ:", err);
-      return { ok: false, error: "network" };
-    });
+  });
+  const raw = await r.text();
+  try {
+    return JSON.parse(raw);
+  } catch (parseErr) {
+    console.error(
+      "Apps Script không trả về JSON hợp lệ (action=" + action + ", http=" + r.status + "). Nội dung thô nhận được:",
+      raw.slice(0, 500)
+    );
+    throw parseErr;
+  }
+}
+
+function callServer(action, data = {}, _isRetry = false) {
+  return callServerOnce_(action, data).catch(err => {
+    if (!_isRetry) {
+      console.warn("callServer(" + action + ") thất bại, đang tự thử lại lần 2...", err);
+      return new Promise(resolve => setTimeout(resolve, 800))
+        .then(() => callServer(action, data, true));
+    }
+    console.error("Lỗi kết nối máy chủ (action=" + action + ") sau khi đã thử lại:", err);
+    return { ok: false, error: "network" };
+  });
+}
+
+/* Dịch mã lỗi trả về từ server (hoặc lỗi mạng cục bộ) thành thông báo dễ
+   hiểu, để KHÔNG còn hiện chung chung "Không kết nối được máy chủ" cho mọi
+   trường hợp thất bại — điều này từng khiến rất khó chẩn đoán lỗi thật. */
+function describeServerError(res) {
+  const code = res && res.error;
+  switch (code) {
+    case "network":
+      return "Không kết nối được máy chủ (mất mạng, hoặc URL Apps Script sai/chưa deploy). Vui lòng kiểm tra mạng và thử lại!";
+    case "unknown_action":
+      return "Máy chủ Google Apps Script đang chạy PHIÊN BẢN CODE CŨ, chưa có chức năng này. Hãy vào Apps Script > Deploy > Manage deployments > sửa deployment hiện có > chọn 'New version' rồi Deploy lại.";
+    case "missing_username":
+    case "missing_fields":
+      return "Thiếu thông tin học viên (danh sách học viên có thể chưa tải xong) — hãy thử lại sau vài giây.";
+    case "not_found":
+      return "Không tìm thấy tài khoản học viên này trên máy chủ.";
+    case "lock_timeout":
+      return "Máy chủ đang bận xử lý request khác (quá nhiều thiết bị thao tác cùng lúc), vui lòng thử lại sau vài giây.";
+    case "wrong_password":
+      return "Sai mật khẩu.";
+    case "username_taken":
+      return "Tên đăng nhập đã tồn tại.";
+    case "exception":
+      return "Máy chủ gặp lỗi khi xử lý" + (res && res.message ? (": " + res.message) : "") + ". Vui lòng thử lại, nếu còn lặp lại hãy kiểm tra mục Executions trong Apps Script.";
+    default:
+      return code ? ("Lỗi từ máy chủ: " + code) : "Có lỗi không xác định xảy ra, vui lòng thử lại!";
+  }
 }
 
 let _progressSyncTimer = null;
@@ -5004,7 +5058,7 @@ function autoUnlockTeacherDashboard() {
 function initTeacherCMSHandlers() {
   document.getElementById("teacher-login-btn")?.addEventListener("click", () => {
     const p = document.getElementById("teacher-password-input").value;
-    if (p === "123455" || p === "123") {
+    if (p === "1234555") {
       autoUnlockTeacherDashboard();
     } else {
       alert("Mật khẩu giáo viên không chính xác!");
@@ -5243,7 +5297,7 @@ function initTeacherCMSHandlers() {
     btn.textContent = originalLabel;
 
     if (!res || !res.ok) {
-      return alert("Không kết nối được máy chủ, vui lòng thử lại!");
+      return alert("❌ Không cộng/trừ Trúc được cho " + displayName + ":\n" + describeServerError(res));
     }
 
     /* Nếu giáo viên vô tình chọn đúng tài khoản đang đăng nhập trên máy
@@ -5304,7 +5358,7 @@ function initTeacherCMSHandlers() {
     btn.textContent = originalLabel;
 
     if (!res || !res.ok) {
-      return alert("Không kết nối được máy chủ, vui lòng thử lại!");
+      return alert("❌ Không trao được huy hiệu cho " + displayName + ":\n" + describeServerError(res));
     }
     if (res.alreadyHad) {
       alert(`${displayName} đã có huy hiệu này rồi!`);
