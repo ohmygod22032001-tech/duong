@@ -643,6 +643,7 @@
   }
 </style>
 <script src="https://www.youtube.com/iframe_api"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 </head>
 <body>
 
@@ -1150,8 +1151,8 @@
 
       <!-- QUẢN LÝ & XÓA TÀI KHOẢN HỌC VIÊN -->
       <div style="background:var(--card-bg); border:3px solid var(--paper-darker); border-radius:22px; padding:20px; margin-bottom:20px;">
-        <h4 style="margin:0 0 10px; color:var(--seal-dark); font-family:var(--serif);">👥 Quản Lý & Xóa Tài Khoản Học Viên</h4>
-        <p style="font-size:12px; color:var(--ink-soft); margin-bottom:12px;">Giáo viên có quyền xóa bất kỳ tài khoản học viên nào khỏi hệ thống, danh sách lớp và Bảng Xếp Hạng:</p>
+        <h4 style="margin:0 0 10px; color:var(--seal-dark); font-family:var(--serif);">👥 Thành Viên Của Lớp Đang Chọn</h4>
+        <p style="font-size:12px; color:var(--ink-soft); margin-bottom:12px;">Danh sách dưới đây CHỈ gồm những tài khoản đã từng nhập đúng mật khẩu để vào lớp hiện tại (<span id="cms-current-class-label" style="font-weight:700;"></span>). Dùng <strong>🚪 Gỡ khỏi lớp</strong> nếu có học viên/lớp khác join nhầm vào đây (tài khoản của họ vẫn giữ nguyên, chỉ biến mất khỏi Bảng Xếp Hạng của lớp này); dùng <strong>🗑️ Xóa tài khoản</strong> nếu muốn xóa vĩnh viễn cả tài khoản đó khỏi toàn hệ thống.</p>
         <div id="cms-student-accounts-list" style="display:flex; flex-direction:column; gap:8px;"></div>
       </div>
 
@@ -1384,6 +1385,53 @@
 const STORAGE_KEY = "zhVocabApp_multiclass_panda_v7";
 var state = null;
 const ANSWER_SHEET_ENDPOINT = "https://script.google.com/macros/s/AKfycbzQYTWaCofpFBH7f1SoIqJzS6cmOFZH7kZj6z9Ca0BvkGTmtHjxi-OdMteMLGlMHVBT/exec";
+
+/* ==== SUPABASE (Bước 2) ====
+   Dán Project URL + anon key của bạn vào đây — lấy ở Supabase Dashboard
+   > Settings > API. anon key là public-safe, được thiết kế để lộ ra
+   client (mọi quyền thật đã bị khóa ở RLS, chỉ mở qua RPC — xem file
+   supabase_schema.sql). ANSWER_SHEET_ENDPOINT ở trên vẫn giữ nguyên,
+   CHỈ dùng cho action "student_answer" (sheet Answers không chuyển). */
+const SUPABASE_URL = "https://lloyrptuayudrcqodcbk.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_wtg526_eE17ZGL5pwaEFoQ_3nyNabGE";
+const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+/* Map "action" cũ (Apps Script) -> tên RPC function trong Supabase +
+   cách đổi tên field từ camelCase (client) sang p_snake_case (Postgres).
+   Chỉ những action trong danh sách này được chuyển sang Supabase; action
+   không có mặt ở đây (student_answer) vẫn đi qua callServer cũ/Apps Script
+   nếu có gọi tới — nhưng thực tế "student_answer" dùng thẳng
+   sendAnswerToGoogleSheet(), không qua callServer(). */
+const SUPABASE_ACTIONS_ = {
+  login_account: { fn: "login_account", params: { username: "p_username", password: "p_password", role: "p_role" } },
+  register_account: { fn: "register_account", params: { username: "p_username", displayName: "p_display_name", password: "p_password", role: "p_role" } },
+  update_account_name: { fn: "update_account_name", params: { username: "p_username", displayName: "p_display_name" } },
+  delete_account: { fn: "delete_account", params: { username: "p_username" } },
+  get_progress: { fn: "get_progress", params: { username: "p_username" } },
+  save_progress: { fn: "save_progress", params: { username: "p_username", progress: "p_progress" } },
+  join_class: { fn: "join_class", params: { className: "p_class_name", username: "p_username", displayName: "p_display_name" } },
+  get_class_members: { fn: "get_class_members", params: { className: "p_class_name" } },
+  remove_class_member: { fn: "remove_class_member", params: { className: "p_class_name", username: "p_username" } },
+  delete_class_members: { fn: "delete_class_members", params: { className: "p_class_name" } },
+  grant_bamboo: { fn: "grant_bamboo", params: { username: "p_username", amount: "p_amount", reason: "p_reason" } },
+  award_badge: { fn: "award_badge", params: { username: "p_username", badgeId: "p_badge_id", xp: "p_xp", charm: "p_charm", badgeTitle: "p_badge_title", badgeIcon: "p_badge_icon" } },
+  get_shared_config: { fn: "get_shared_config", params: {} },
+  save_shared_config: { fn: "save_shared_config", params: { config: "p_config" } }
+};
+
+async function callSupabaseRpc_(action, data) {
+  const spec = SUPABASE_ACTIONS_[action];
+  const rpcParams = {};
+  Object.keys(spec.params).forEach(clientKey => {
+    rpcParams[spec.params[clientKey]] = data[clientKey] !== undefined ? data[clientKey] : null;
+  });
+  const { data: result, error } = await supabaseClient.rpc(spec.fn, rpcParams);
+  if (error) {
+    console.error("Supabase RPC lỗi (action=" + action + "):", error);
+    throw error;
+  }
+  return result;
+}
 const TEACHER_ZALO_PHONE = "0985381914";
 
 /* Default Vocabulary */
@@ -2115,7 +2163,15 @@ async function callServerOnce_(action, data) {
 }
 
 function callServer(action, data = {}, _isRetry = false) {
-  return callServerOnce_(action, data).catch(err => {
+  /* Bước 3: action nào đã có RPC tương ứng trong SUPABASE_ACTIONS_ thì đi
+     qua Supabase (nhanh hơn, không qua LockService/cold-start của Apps
+     Script). Action còn lại (vd: student_answer, nếu lỡ gọi qua đây) vẫn
+     đi Apps Script như cũ, không đổi gì hành vi. */
+  const runner = SUPABASE_ACTIONS_[action]
+    ? () => callSupabaseRpc_(action, data)
+    : () => callServerOnce_(action, data);
+
+  return runner().catch(err => {
     if (!_isRetry) {
       console.warn("callServer(" + action + ") thất bại, đang tự thử lại lần 2...", err);
       return new Promise(resolve => setTimeout(resolve, 800))
@@ -2249,8 +2305,19 @@ async function syncSharedConfigFromServer() {
 let serverRoster = [];         // [{username, displayName, role, totalXp, bambooPouch, unlockedBadges, decorations, badgeCharmBonus, spiritAnimal, streak}]
 let _rosterLastFetch = 0;
 
+/* FIX: trước đây hàm này gọi "get_all_students" — trả về TOÀN BỘ tài
+   khoản trong hệ thống, nên tạo lớp mới là tự động thấy hết mọi học viên
+   của MỌI lớp khác trong Bảng Xếp Hạng. Giờ chỉ lấy đúng những tài khoản
+   đã từng nhập ĐÚNG mật khẩu của state.currentClassName (action mới
+   "get_class_members"), nhờ đó mỗi lớp chỉ thấy đúng thành viên của lớp
+   mình. */
 async function refreshServerRoster() {
-  const res = await callServer("get_all_students", {});
+  const cName = state.currentClassName;
+  if (!cName) {
+    serverRoster = [];
+    return serverRoster;
+  }
+  const res = await callServer("get_class_members", { className: cName });
   if (res && res.ok && Array.isArray(res.students)) {
     serverRoster = res.students;
     _rosterLastFetch = Date.now();
@@ -2765,7 +2832,26 @@ async function checkAutoSession() {
       document.getElementById("selector-student-name").value = state.studentName;
 
       if (state.currentClassName && state.classes[state.currentClassName]) {
-        enterClass(state.currentClassName);
+        /* FIX: người dùng có phiên đăng nhập đã lưu (khỏi cần gõ lại mật
+           khẩu lớp mỗi lần mở app) trước đây sẽ KHÔNG BAO GIỜ được ghi
+           vào ClassMembers, vì join_class chỉ được gọi trong
+           submitClassPassword(). Hệ quả: học viên vẫn tự thấy mình trong
+           Bảng Xếp Hạng (được thêm cứng phía client), nhưng phía giáo
+           viên (dropdown Cộng/Trừ Trúc, Trao Huy Hiệu, danh sách CMS)
+           lại không thấy họ vì server chưa hề ghi nhận họ là thành viên
+           của lớp. Gọi join_class lại ở đây (an toàn, ghi đè không trùng
+           lặp) để mọi phiên đăng nhập — cũ lẫn mới — đều được đăng ký
+           đúng vào lớp đang dùng. */
+        if (state.username) {
+          try {
+            await callServer("join_class", {
+              className: state.currentClassName,
+              username: state.username,
+              displayName: state.studentName
+            });
+          } catch (e) {}
+        }
+        await enterClass(state.currentClassName);
       } else {
         document.getElementById("class-selector-overlay").style.display = "flex";
         initClassSelector();
@@ -2830,7 +2916,7 @@ function closeClassPasswordModal() {
   if (modal) modal.style.display = "none";
 }
 
-function submitClassPassword() {
+async function submitClassPassword() {
   if (!pendingClassName) return;
   const input = document.getElementById("class-password-input");
   const entered = input ? input.value : "";
@@ -2840,7 +2926,19 @@ function submitClassPassword() {
   if (entered === correctPass) {
     const cName = pendingClassName;
     closeClassPasswordModal();
-    enterClass(cName);
+    /* FIX: chỉ khi nhập ĐÚNG mật khẩu mới ghi danh tài khoản này vào lớp
+       (join_class) — đây là điều kiện DUY NHẤT để tài khoản xuất hiện
+       trong Bảng Xếp Hạng của lớp "cName". */
+    if (state.username) {
+      try {
+        await callServer("join_class", {
+          className: cName,
+          username: state.username,
+          displayName: state.studentName
+        });
+      } catch (e) {}
+    }
+    await enterClass(cName);
   } else {
     alert("Mật khẩu lớp không đúng! Vui lòng hỏi giáo viên để lấy mật khẩu chính xác.");
     if (input) { input.value = ""; input.focus(); }
@@ -2861,12 +2959,16 @@ function initClassPasswordModalHandlers() {
   }
 }
 
-function enterClass(cName) {
+async function enterClass(cName) {
   state.currentClassName = cName;
   grammarActiveSectionId = null;
   saveState();
   document.getElementById("class-selector-overlay").style.display = "none";
   document.getElementById("current-class-badge").textContent = cName;
+  /* FIX: nạp lại danh sách thành viên NGAY cho đúng lớp vừa vào — nếu
+     không, Bảng Xếp Hạng có thể tạm thời còn hiển thị danh sách của lớp
+     trước đó cho tới lần poll kế tiếp. */
+  await refreshServerRoster();
   updateGamificationUI();
   if (state.role === "teacher") {
     refreshActiveViewData();
@@ -5640,10 +5742,15 @@ function renderTeacherCMS() {
 
     cListWrap.querySelectorAll(".del-class-btn").forEach(btn => {
       btn.onclick = () => {
-        if (confirm(`Xóa lớp "${btn.dataset.name}"?`)) {
-          delete state.classes[btn.dataset.name];
+        const delName = btn.dataset.name;
+        if (confirm(`Xóa lớp "${delName}"?`)) {
+          delete state.classes[delName];
           state.currentClassName = Object.keys(state.classes)[0];
           saveState();
+          /* Dọn luôn danh sách ghi danh của lớp vừa xóa trên server, để
+             không sót thành viên "mồ côi" (thuộc về 1 lớp không còn tồn
+             tại) trong sheet ClassMembers. */
+          callServer("delete_class_members", { className: delName }).catch(() => {});
           renderTeacherCMS();
         }
       };
@@ -5780,11 +5887,16 @@ function renderTeacherStudentAccountManager() {
   if (!container) return;
   container.innerHTML = "";
 
+  const labelEl = document.getElementById("cms-current-class-label");
+  if (labelEl) labelEl.textContent = state.currentClassName || "(chưa chọn lớp)";
+
   const accs = getLocalAccounts();
   const studentMap = {};
 
-  /* Nguồn chính: danh sách thật trên server (Accounts Sheet) — thấy được
-     học viên đăng ký từ BẤT KỲ thiết bị nào, không chỉ máy này. */
+  /* FIX: serverRoster giờ đã được refreshServerRoster() lọc sẵn theo
+     state.currentClassName (chỉ gồm ai từng nhập đúng mật khẩu lớp này),
+     nên danh sách dưới đây tự động là "thành viên của lớp đang chọn",
+     không còn lẫn học viên của các lớp khác. */
   serverRoster.forEach(s => {
     if (s.role === "teacher") return;
     studentMap[s.username] = {
@@ -5795,23 +5907,9 @@ function renderTeacherStudentAccountManager() {
     };
   });
 
-  /* Dự phòng khi mất mạng / chưa tải được roster: dùng cache cục bộ */
-  if (serverRoster.length === 0) {
-    Object.keys(accs).forEach(u => {
-      if (accs[u] && accs[u].role !== "teacher") {
-        studentMap[u] = {
-          username: u,
-          displayName: accs[u].displayName || u,
-          password: accs[u].password || "***",
-          fromAccounts: true
-        };
-      }
-    });
-  }
-
   const students = Object.values(studentMap);
   if (students.length === 0) {
-    container.innerHTML = `<div style="text-align:center; padding:16px; color:var(--ink-soft); font-size:13px; background:var(--paper); border-radius:12px; border:2px dashed var(--paper-darker);">Chưa có tài khoản học viên nào trong hệ thống.</div>`;
+    container.innerHTML = `<div style="text-align:center; padding:16px; color:var(--ink-soft); font-size:13px; background:var(--paper); border-radius:12px; border:2px dashed var(--paper-darker);">Chưa có học viên nào ghi danh lớp "${state.currentClassName || ''}" (chưa ai nhập đúng mật khẩu lớp này).</div>`;
     return;
   }
 
@@ -5826,9 +5924,10 @@ function renderTeacherStudentAccountManager() {
           <span style="font-size:11px; color:var(--ink-soft); margin-left:6px;">(Username: <code>${s.username}</code> | Mật khẩu: <code>${s.password}</code>)</span>
         </div>
       </div>
-      <div style="display:flex; gap:6px;">
+      <div style="display:flex; gap:6px; flex-wrap:wrap;">
         <button class="btn btn-primary rename-student-account-btn" data-username="${s.username}" data-display="${s.displayName}" style="font-size:11px; padding:5px 12px; font-weight:700;">✏️ Đổi Tên</button>
-        <button class="btn btn-bad delete-student-account-btn" data-username="${s.username}" data-display="${s.displayName}" style="font-size:11px; padding:5px 12px; font-weight:700;">🗑️ Xóa</button>
+        <button class="btn btn-outline remove-class-member-btn" data-username="${s.username}" data-display="${s.displayName}" style="font-size:11px; padding:5px 12px; font-weight:700;">🚪 Gỡ khỏi lớp</button>
+        <button class="btn btn-bad delete-student-account-btn" data-username="${s.username}" data-display="${s.displayName}" style="font-size:11px; padding:5px 12px; font-weight:700;">🗑️ Xóa tài khoản</button>
       </div>
     `;
     container.appendChild(row);
@@ -5842,6 +5941,14 @@ function renderTeacherStudentAccountManager() {
     };
   });
 
+  container.querySelectorAll(".remove-class-member-btn").forEach(btn => {
+    btn.onclick = () => {
+      const uName = btn.dataset.username;
+      const dName = btn.dataset.display;
+      removeClassMemberFromClass(uName, dName);
+    };
+  });
+
   container.querySelectorAll(".delete-student-account-btn").forEach(btn => {
     btn.onclick = () => {
       const uName = btn.dataset.username;
@@ -5849,6 +5956,28 @@ function renderTeacherStudentAccountManager() {
       deleteStudentAccount(uName, dName);
     };
   });
+}
+
+/* FIX MỚI: gỡ 1 học viên khỏi lớp ĐANG CHỌN (không xóa tài khoản) — dùng
+   cho đúng tình huống "lớp khác join nhầm vào lớp này": học viên biến
+   mất khỏi Bảng Xếp Hạng của lớp này, nhưng tài khoản/mật khẩu/tiến
+   trình học của họ vẫn còn nguyên, họ vẫn có thể nhập lại mật khẩu để
+   vào đúng lớp của mình. */
+function removeClassMemberFromClass(username, displayName) {
+  const cName = state.currentClassName;
+  if (!cName) return;
+  if (!confirm(`🚪 GỠ HỌC VIÊN KHỎI LỚP "${cName}"\n\nBạn có chắc chắn muốn gỡ "${displayName}" khỏi lớp này không?\n\n- Học viên sẽ biến mất khỏi Bảng Xếp Hạng của lớp "${cName}".\n- Tài khoản, mật khẩu và toàn bộ tiến trình học KHÔNG bị xóa — họ vẫn có thể nhập lại đúng mật khẩu lớp của mình để tham gia lại lớp đó bất cứ lúc nào.`)) {
+    return;
+  }
+
+  callServer("remove_class_member", { className: cName, username })
+    .then(() => refreshServerRoster())
+    .then(() => {
+      renderTeacherCMS();
+      updateGamificationUI();
+      renderLeaderboardContent();
+      showToast(`🚪 Đã gỡ "${displayName}" khỏi lớp "${cName}"!`, "success");
+    });
 }
 
 function renameStudentAccount(username, currentDisplayName) {
@@ -5935,7 +6064,7 @@ function renameStudentAccount(username, currentDisplayName) {
 }
 
 function deleteStudentAccount(username, displayName) {
-  if (!confirm(`⚠️ XÁC NHẬN XÓA TÀI KHOẢN HỌC VIÊN\n\nBạn có chắc chắn muốn XÓA VĨNH VIỄN tài khoản "${displayName}" (${username}) không?\n\n- Học viên sẽ bị xóa khỏi Bảng Xếp Hạng và danh sách lớp.\n- Mọi dữ liệu bài nộp và tài khoản sẽ bị hủy vĩnh viễn.`)) {
+  if (!confirm(`⚠️ XÁC NHẬN XÓA TÀI KHOẢN HỌC VIÊN\n\nBạn có chắc chắn muốn XÓA VĨNH VIỄN tài khoản "${displayName}" (${username}) không?\n\n- Tài khoản sẽ bị xóa khỏi TOÀN BỘ hệ thống — kể cả mọi lớp khác họ đã ghi danh, không chỉ lớp hiện tại.\n- Nếu chỉ muốn gỡ họ khỏi RIÊNG lớp này (vẫn giữ tài khoản), dùng nút "🚪 Gỡ khỏi lớp" thay vì nút này.\n- Mọi dữ liệu bài nộp và tài khoản sẽ bị hủy vĩnh viễn, không thể khôi phục.`)) {
     return;
   }
 
