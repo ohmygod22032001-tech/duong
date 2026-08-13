@@ -19,6 +19,8 @@
   window.addEventListener("pageshow", function (evt) {
     if (evt.persisted) {
       window.location.reload();
+    } else if (typeof checkForNewVersion === "function") {
+      checkForNewVersion();
     }
   });
 </script>
@@ -1002,6 +1004,10 @@
         <option value="9999">Tất cả</option>
       </select>
       <button class="btn btn-primary" id="qz-start">Bắt đầu kiểm tra 🐼 (+Trúc)</button>
+      <label style="font-size:13px; font-weight:700; display:flex; align-items:center; gap:6px; cursor:pointer;">
+        <input type="checkbox" id="qz-hide-pinyin" style="width:16px; height:16px; cursor:pointer;">
+        🙈 Ẩn Pinyin
+      </label>
     </div>
     <div id="qz-area"></div>
   </section>
@@ -1012,6 +1018,10 @@
     <div class="filters">
       <select id="tm-topic"></select>
       <span class="stat-pill" id="tm-best">Kỷ lục: —</span>
+      <label style="font-size:13px; font-weight:700; display:flex; align-items:center; gap:6px; cursor:pointer;">
+        <input type="checkbox" id="tm-hide-pinyin" style="width:16px; height:16px; cursor:pointer;">
+        🙈 Ẩn Pinyin
+      </label>
     </div>
     <div id="tm-area"></div>
   </section>
@@ -1408,6 +1418,19 @@
 const STORAGE_KEY = "zhVocabApp_multiclass_panda_v7";
 var state = null;
 const ANSWER_SHEET_ENDPOINT = "https://script.google.com/macros/s/AKfycbzQYTWaCofpFBH7f1SoIqJzS6cmOFZH7kZj6z9Ca0BvkGTmtHjxi-OdMteMLGlMHVBT/exec";
+
+/* FIX: GitHub Pages KHÔNG cho phép đặt HTTP header Cache-Control tùy chỉnh
+   (không có tính năng như file _headers của Netlify), và CDN của GitHub
+   (Fastly) mặc định tự cache file tĩnh tới ~10 phút — nên thẻ <meta
+   http-equiv="Cache-Control"> ở đầu file chỉ mang tính gợi ý, không đảm
+   bảo trình duyệt/CDN luôn tải bản mới. Để khắc phục, app tự định kỳ tải
+   lại CHÍNH file HTML này (kèm query-string ngẫu nhiên để buộc bỏ qua mọi
+   tầng cache), so sánh APP_BUILD_ID trong bản mới với bản đang chạy —
+   nếu khác nhau tức là Thầy Marcus vừa đẩy bản cập nhật lên GitHub, app
+   sẽ tự làm mới trang cho học viên (xem checkForNewVersion() bên dưới).
+   ‼️ MỖI LẦN sửa file rồi push lên GitHub, hãy đổi giá trị bên dưới
+   (vd sang ngày hôm đó) để cơ chế này nhận ra bản mới: */
+const APP_BUILD_ID = "20260813a";
 
 /* ==== SUPABASE (Bước 2) ====
    Dán Project URL + anon key của bạn vào đây — lấy ở Supabase Dashboard
@@ -1960,7 +1983,17 @@ function sanitizeState(s) {
   if (typeof s.currentClassName !== "string") s.currentClassName = "Lớp HSK 2 - Ca Tối";
 
   if (!s.classes || typeof s.classes !== "object") s.classes = {};
-  if (!s.classes["Lớp HSK 2 - Ca Tối"]) {
+  /* FIX QUAN TRỌNG: đây chính là nguyên nhân lớp "Lớp HSK 2 - Ca Tối"
+     luôn "hồi sinh" dù giáo viên đã xóa và đồng bộ lên server thành
+     công. Điều kiện CŨ kiểm tra "nếu lớp tên NÀY chưa tồn tại thì tự
+     tạo lại" — hàm sanitizeState() này lại chạy ở RẤT NHIỀU nơi (mỗi
+     lần mở app, mỗi lần đồng bộ server 8 giây/lần...), nên hễ giáo viên
+     xóa xong là ngay lượt sanitizeState() kế tiếp lại tự tạo lại lớp
+     y hệt — bất kể server đã lưu đúng là lớp đã bị xóa. Giờ chỉ tự tạo
+     lớp mặc định này khi KHÔNG CÒN LỚP NÀO CẢ (ví dụ lần cài đặt đầu
+     tiên, hoặc app từng bị lỗi làm rỗng state.classes) — không còn tự
+     "hồi sinh" một lớp cụ thể đã bị giáo viên chủ động xóa nữa. */
+  if (Object.keys(s.classes).length === 0) {
     s.classes["Lớp HSK 2 - Ca Tối"] = {
       password: "123",
       videos: [
@@ -2014,6 +2047,7 @@ function sanitizeState(s) {
   if (typeof s.streak !== "number") s.streak = 1;
   if (typeof s.lastStudyDate !== "string") s.lastStudyDate = new Date().toDateString();
   if (typeof s.challengeSeconds !== "number") s.challengeSeconds = 4;
+  if (typeof s.hidePinyin !== "boolean") s.hidePinyin = false;
   if (typeof s.timedMinSplitCount !== "number" || s.timedMinSplitCount < 1) s.timedMinSplitCount = 20;
   if (typeof s.customTitle !== "string") s.customTitle = "🎋 雅趣学堂 · WEB TỪ VỰNG CỦA THẦY MARCUS 🎋";
   if (typeof s.colorPaper !== "string") s.colorPaper = "#F0F7F4";
@@ -2071,6 +2105,53 @@ function sanitizeState(s) {
     ];
   }
 
+  /* FIX: "Bảng Tin Lớp" (activityFeed) và "Thông báo ghim" (announcement)
+     TRƯỚC ĐÂY nằm trong g = state.gamification — vốn là dữ liệu RIÊNG của
+     từng tài khoản/thiết bị (chỉ đồng bộ qua get_progress/save_progress
+     của CHÍNH học viên đó). Kết quả: khi giáo viên cộng Trúc/trao huy hiệu
+     cho 1 học viên, hoặc học viên A vừa lên Level, chỉ máy của người đó
+     mới ghi log — các học viên khác không hề thấy, dù giao diện có ghi
+     "đã phát lên Bảng Tin Lớp". Giờ chuyển 2 mục này thành state.announcement
+     và state.classFeeds ở CẤP GỐC, nằm trong SHARED_FIELDS (xem bên dưới)
+     nên được đồng bộ qua get_shared_config/save_shared_config — giống hệt
+     cơ chế đã dùng cho tên lớp, màu giao diện... nhờ đó MỌI thiết bị của
+     MỌI học viên đều thấy đúng 1 Thông báo ghim giống nhau, tự cập nhật
+     mỗi ~8 giây qua pollLiveUpdates(). Dòng dưới di trú dữ liệu cũ (nếu máy
+     này từng có) sang chỗ mới để không mất thông tin. */
+  if (typeof s.announcement !== "string") {
+    s.announcement = g.announcement;
+  }
+
+  /* FIX: "Bảng Tin Lớp" TÁCH RIÊNG theo từng lớp — trước đây dùng
+     s.globalFeed là 1 MẢNG DUY NHẤT dùng chung cho TOÀN HỆ THỐNG, nên nếu
+     1 giáo viên (VD Thầy Marcus) dạy nhiều lớp, học viên lớp A sẽ thấy cả
+     hoạt động (lên Level, được cộng Trúc, trao huy hiệu...) của lớp B, và
+     ngược lại — lộ thông tin giữa các lớp không liên quan tới nhau. Giờ
+     đổi thành s.classFeeds = { "<Tên lớp>": [ ...tin nhắn... ] } — mỗi lớp
+     có mảng tin riêng, và addActivityLog()/renderActivityFeed() bên dưới
+     chỉ đọc/ghi đúng đúng mảng của state.currentClassName. Nếu học viên đổi
+     lớp (enterClass), Bảng Tin sẽ hiển thị đúng mảng của lớp mới, không
+     còn thấy tin của lớp cũ nữa. Dòng dưới di trú dữ liệu globalFeed cũ
+     (nếu máy này từng có) vào đúng lớp đang chọn hiện tại, để không mất
+     lịch sử — các lượt phát tin MỚI sau bản cập nhật này sẽ tự động đúng
+     lớp ngay từ đầu. */
+  if (!s.classFeeds || typeof s.classFeeds !== "object" || Array.isArray(s.classFeeds)) {
+    s.classFeeds = {};
+    const legacyFeed = Array.isArray(s.globalFeed) ? s.globalFeed
+      : (Array.isArray(g.activityFeed) ? g.activityFeed.slice(0, 30) : []);
+    if (legacyFeed.length && s.currentClassName) {
+      s.classFeeds[s.currentClassName] = legacyFeed;
+    }
+  }
+  delete s.globalFeed; // đã thay bằng s.classFeeds theo từng lớp
+  Object.keys(s.classFeeds).forEach(cName => {
+    if (!Array.isArray(s.classFeeds[cName])) { s.classFeeds[cName] = []; return; }
+    s.classFeeds[cName].forEach(item => {
+      if (item && typeof item.ts !== "number") item.ts = Date.now();
+      if (item && !item.id) item.id = "g_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7);
+    });
+  });
+
   if (!Array.isArray(g.badgesConfig)) {
     g.badgesConfig = [];
   }
@@ -2104,7 +2185,7 @@ function sanitizeState(s) {
 const PROGRESS_FIELDS = [
   "gamification", "learned", "reviewWords", "dictationSubmissions",
   "timedSubmissions", "timedBest", "streak", "lastStudyDate",
-  "challengeSeconds", "timedMinSplitCount"
+  "challengeSeconds", "timedMinSplitCount", "hidePinyin"
 ];
 
 function captureCurrentProgress() {
@@ -2271,7 +2352,7 @@ async function syncProgressFromServer() {
    viên nào, mà phải giống nhau trên MỌI thiết bị. Trước đây
    phần này chỉ nằm trong localStorage của từng máy nên mỗi
    thiết bị thấy một giao diện/lớp học khác nhau. */
-const SHARED_FIELDS = ["classes", "customTitle", "colorPaper", "colorInk", "colorJade", "bgImage"];
+const SHARED_FIELDS = ["classes", "customTitle", "colorPaper", "colorInk", "colorJade", "bgImage", "announcement", "classFeeds"];
 
 function captureSharedConfig() {
   const c = {};
@@ -2279,10 +2360,46 @@ function captureSharedConfig() {
   return c;
 }
 
+/* "classFeeds" là object { "<Tên lớp>": [...tin...] } — trong CÙNG 1 lớp,
+   nhiều người có thể CÙNG lúc thêm tin (học viên A vừa lên Level, giáo
+   viên vừa cộng Trúc cho học viên B, học viên C vừa cướp Trúc...) — nếu
+   ghi đè thẳng như các field khác (classes, màu sắc...) thì thiết bị nào
+   lưu SAU sẽ vô tình xóa mất tin của người lưu TRƯỚC trong lúc 2 bên chưa
+   kịp đồng bộ (mỗi 8 giây/lượt). Hàm này GỘP theo từng lớp: với mỗi lớp,
+   gộp 2 danh sách theo id, sắp theo thời gian mới nhất, chỉ GIỮ TỐI ĐA
+   50 TIN MỚI NHẤT mỗi lớp — tin cũ hơn (vượt quá 50) sẽ tự động bị loại
+   bỏ để nhường chỗ cho tin mới. Các lớp không hề bị trộn tin với nhau. */
+const CLASS_FEED_MAX_ITEMS = 50;
+function mergeOneClassFeed(localFeed, remoteFeed) {
+  const map = new Map();
+  [].concat(Array.isArray(localFeed) ? localFeed : [], Array.isArray(remoteFeed) ? remoteFeed : [])
+    .forEach(item => { if (item && item.id) map.set(item.id, item); });
+  return Array.from(map.values())
+    .sort((a, b) => (b.ts || 0) - (a.ts || 0))
+    .slice(0, CLASS_FEED_MAX_ITEMS);
+}
+
+
+function mergeClassFeeds(localFeeds, remoteFeeds) {
+  const merged = {};
+  const l = (localFeeds && typeof localFeeds === "object") ? localFeeds : {};
+  const r = (remoteFeeds && typeof remoteFeeds === "object") ? remoteFeeds : {};
+  const allClassNames = new Set([...Object.keys(l), ...Object.keys(r)]);
+  allClassNames.forEach(cName => {
+    merged[cName] = mergeOneClassFeed(l[cName], r[cName]);
+  });
+  return merged;
+}
+
 function applySharedConfig(c) {
   if (!c) return;
   SHARED_FIELDS.forEach(f => {
-    if (c[f] !== undefined) state[f] = c[f];
+    if (c[f] === undefined) return;
+    if (f === "classFeeds") {
+      state.classFeeds = mergeClassFeeds(state.classFeeds, c.classFeeds);
+    } else {
+      state[f] = c[f];
+    }
   });
 }
 
@@ -2312,6 +2429,26 @@ function pushSharedConfigToServer() {
     callServer("save_shared_config", { config: JSON.parse(currentJson) })
       .finally(() => { _sharedConfigPushPending = false; });
   }, 1500);
+}
+
+/* FIX: pushSharedConfigToServer() ở trên đợi 1.5s (debounce) rồi mới đẩy
+   lên server — vốn hợp lý để gộp nhiều thay đổi liên tiếp (gõ màu, gõ
+   tiêu đề...) thành 1 lần lưu. NHƯNG với thao tác "phá hủy" như Xóa lớp /
+   Đổi tên lớp, nếu giáo viên đóng tab hoặc tải lại trang trong lúc 1.5s
+   đó chưa trôi qua, setTimeout sẽ KHÔNG BAO GIỜ chạy (bị hủy theo trang) —
+   nghĩa là lượt xóa/đổi tên KHÔNG ĐƯỢC lưu lên server. Lần mở app sau đó
+   (hoặc thiết bị khác), syncSharedConfigFromServer() sẽ kéo về bản CŨ
+   trên server (vẫn còn lớp vừa xóa) và ghi đè lên, khiến lớp "hồi sinh".
+   Hàm dưới đây đẩy lên server NGAY LẬP TỨC (bỏ qua debounce) và CHỜ
+   server xác nhận xong mới coi là hoàn tất — dùng cho các thao tác quan
+   trọng, không thể chờ debounce. */
+function pushSharedConfigNow() {
+  clearTimeout(_sharedConfigSyncTimer);
+  const currentJson = JSON.stringify(captureSharedConfig());
+  _sharedConfigPushPending = true;
+  return callServer("save_shared_config", { config: JSON.parse(currentJson) })
+    .then(() => { _lastSharedConfigJson = currentJson; })
+    .finally(() => { _sharedConfigPushPending = false; });
 }
 
 /* Gọi 1 lần khi app khởi động: nếu server đã có cấu hình chung (do
@@ -2446,6 +2583,50 @@ function stopLiveSync() {
   }
 }
 
+/* =========================================================
+   TỰ PHÁT HIỆN BẢN CẬP NHẬT MỚI TRÊN GITHUB PAGES
+   ---------------------------------------------------------
+   GitHub Pages không hỗ trợ Cache-Control tùy chỉnh, nên trình duyệt
+   (và CDN Fastly của GitHub) có thể giữ lại bản HTML/JS cũ trong nhiều
+   phút dù Thầy đã push bản mới. Hàm dưới đây tự tải lại CHÍNH file này
+   qua network (kèm query-string ngẫu nhiên để chắc chắn không dính bản
+   cache nào), đọc APP_BUILD_ID trong bản mới đó, và so với bản đang
+   chạy trên máy học viên. Nếu khác nhau -> tự động làm mới trang, học
+   viên không cần bấm Ctrl+F5. Đăng nhập của học viên KHÔNG bị mất vì
+   checkAutoSession() sẽ tự đăng nhập lại từ localStorage sau khi tải lại.
+   ========================================================= */
+let _newVersionReloadTriggered = false;
+async function checkForNewVersion() {
+  if (_newVersionReloadTriggered) return;
+  try {
+    const res = await fetch(location.pathname + "?_freshcheck=" + Date.now(), { cache: "no-store" });
+    if (!res.ok) return;
+    const html = await res.text();
+    const m = html.match(/const APP_BUILD_ID\s*=\s*"([^"]+)"/);
+    if (m && m[1] && m[1] !== APP_BUILD_ID) {
+      _newVersionReloadTriggered = true;
+      showToast("🔄 Đang cập nhật lên phiên bản mới nhất...", "success");
+      setTimeout(() => {
+        window.location.href = location.pathname + "?_v=" + Date.now();
+      }, 1200);
+    }
+  } catch (e) {
+    /* Lỗi mạng thoáng qua -> im lặng bỏ qua, thử lại ở lượt kiểm tra kế tiếp */
+  }
+}
+
+const VERSION_CHECK_INTERVAL_MS = 5 * 60 * 1000; // 5 phút — đủ nhanh, không tốn băng thông
+let _versionCheckTimer = null;
+function startVersionCheckWatcher() {
+  if (_versionCheckTimer) return;
+  _versionCheckTimer = setInterval(() => {
+    if (!document.hidden) checkForNewVersion();
+  }, VERSION_CHECK_INTERVAL_MS);
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) checkForNewVersion();
+  });
+}
+
 async function pollLiveUpdates() {
   if (document.hidden || !state.username) return;
   await Promise.all([
@@ -2458,6 +2639,7 @@ async function pollLiveUpdates() {
   const vId = activeView ? activeView.id : "";
   if (vId === "view-leaderboard") renderLeaderboardContent();
   if (vId === "view-teacher-lists") refreshTeacherRosterUI();
+  if (vId === "view-feed") renderActivityFeed();
   updateGamificationUI();
 }
 
@@ -2587,6 +2769,16 @@ function getCurrentClassData() {
   if (!state.currentClassName || !state.classes[state.currentClassName]) {
     const keys = Object.keys(state.classes);
     state.currentClassName = keys[0] || "Lớp HSK 2 - Ca Tối";
+  }
+  if (!state.classes[state.currentClassName]) {
+    /* Phòng hờ: nếu vì lý do gì đó state.classes hoàn toàn rỗng (không
+       nên xảy ra nữa vì nút Xóa lớp giờ chặn xóa lớp cuối cùng), tự
+       tạo 1 lớp mặc định để app không bị crash do cData undefined. */
+    state.classes[state.currentClassName] = {
+      password: "123", videos: [], customWords: [], deletedDefaultIds: [],
+      timedListRewards: {}, timedMinSplitCounts: {}, timedSplitRewards: {},
+      grammarSections: [], grammarSubmissions: []
+    };
   }
   const cData = state.classes[state.currentClassName];
   if (!Array.isArray(cData.videos)) cData.videos = [];
@@ -3028,6 +3220,7 @@ async function enterClass(cName) {
      trước đó cho tới lần poll kế tiếp. */
   await refreshServerRoster();
   updateGamificationUI();
+  renderActivityFeed(); // FIX: đổi lớp -> hiện ngay Bảng Tin của lớp MỚI, không lẫn tin của lớp cũ
   if (state.role === "teacher") {
     refreshActiveViewData();
   } else {
@@ -3169,7 +3362,7 @@ function updateGamificationUI() {
   document.getElementById("gh-xp-bar").style.width = pct + "%";
   document.getElementById("gh-panda-icon").textContent = mySpirit ? mySpirit.icon : (lMeta.outfit || "🌱");
 
-  document.getElementById("announcement-banner-text").textContent = g.announcement;
+  document.getElementById("announcement-banner-text").textContent = state.announcement || g.announcement;
 
   document.getElementById("ph-student-title").textContent = `Gấu Trúc Của ${state.studentName || 'Học viên'}`;
   document.getElementById("ph-level-name").textContent = `LEVEL ${lDetails.level} · ${lMeta.title.toUpperCase()} (💖 ${totalCharm} Mị Lực)`;
@@ -3788,24 +3981,66 @@ function feedPanda(amount) {
   playSound("correct");
 }
 
-function addActivityLog(text) {
-  state.gamification.activityFeed.unshift({
-    id: "a_" + Date.now(),
+/* FIX: ghi vào state.classFeeds[<tên lớp>] (dùng CHUNG cho ĐÚNG 1 lớp,
+   đồng bộ qua server — xem SHARED_FIELDS/mergeClassFeeds phía trên) thay
+   vì state.gamification.activityFeed (trước đây chỉ riêng từng tài khoản)
+   hay state.globalFeed (trước đây dùng CHUNG cho TOÀN HỆ THỐNG, khiến học
+   viên lớp A thấy cả hoạt động của lớp B nếu cùng 1 giáo viên dạy nhiều
+   lớp). Nhờ vậy MỌI hành động gọi hàm này — lên Level, cướp/tặng Trúc,
+   giáo viên cộng Trúc hay trao huy hiệu... — chỉ hiện ra cho học viên
+   ĐANG Ở ĐÚNG LỚP đó, trên mọi thiết bị của họ. Tham số className mặc
+   định là lớp đang hoạt động (state.currentClassName) — đúng với mọi nơi
+   gọi hàm này hiện tại, vì mọi hành động (làm bài, giáo viên cộng Trúc
+   cho học viên trong danh sách lớp đang quản lý...) đều diễn ra trong bối
+   cảnh của lớp đang chọn. */
+function addActivityLog(text, className) {
+  const cName = className || state.currentClassName;
+  if (!cName) return;
+  if (!state.classFeeds || typeof state.classFeeds !== "object") state.classFeeds = {};
+  if (!Array.isArray(state.classFeeds[cName])) state.classFeeds[cName] = [];
+  state.classFeeds[cName].unshift({
+    id: "g_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7),
     text: text,
-    time: "Vừa xong"
+    ts: Date.now()
   });
+  if (state.classFeeds[cName].length > CLASS_FEED_MAX_ITEMS) state.classFeeds[cName].length = CLASS_FEED_MAX_ITEMS;
   saveState();
   renderActivityFeed();
+}
+
+function relativeTimeLabel(ts) {
+  if (typeof ts !== "number") return "";
+  const diffSec = Math.max(0, Math.floor((Date.now() - ts) / 1000));
+  if (diffSec < 60) return "Vừa xong";
+  const diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60) return `${diffMin} phút trước`;
+  const diffHour = Math.floor(diffMin / 60);
+  if (diffHour < 24) return `${diffHour} giờ trước`;
+  const diffDay = Math.floor(diffHour / 24);
+  return `${diffDay} ngày trước`;
 }
 
 function renderActivityFeed() {
   const wrap = document.getElementById("activity-feed-list");
   if (!wrap) return;
   wrap.innerHTML = "";
-  state.gamification.activityFeed.forEach(f => {
+  /* FIX: chỉ đọc đúng mảng của state.currentClassName trong state.classFeeds
+     — nhờ vậy Bảng Tin tách riêng theo từng lớp, học viên lớp A không còn
+     thấy hoạt động của lớp B nữa. Nếu học viên đổi lớp, hàm này (được gọi
+     lại sau enterClass/pollLiveUpdates) sẽ tự hiển thị đúng mảng của lớp
+     mới. */
+  const cName = state.currentClassName;
+  const feed = (cName && state.classFeeds && Array.isArray(state.classFeeds[cName]))
+    ? state.classFeeds[cName] : [];
+  if (feed.length === 0) {
+    wrap.innerHTML = `<div style="text-align:center; padding:18px; color:var(--ink-soft); font-size:13px;">Chưa có hoạt động nào trong Bảng Tin Lớp.</div>`;
+    return;
+  }
+  feed.forEach(f => {
     const d = document.createElement("div");
     d.className = "feed-item";
-    d.innerHTML = `<span>${f.text}</span><span class="f-time">${f.time}</span>`;
+    const timeLabel = typeof f.ts === "number" ? relativeTimeLabel(f.ts) : (f.time || "");
+    d.innerHTML = `<span>${f.text}</span><span class="f-time">${timeLabel}</span>`;
     wrap.appendChild(d);
   });
 }
@@ -3954,6 +4189,15 @@ const qzArea = document.getElementById("qz-area");
 let qzQueue = [], qzIdx = 0, qzScore = 0;
 
 function initQuizHandlers() {
+  const qzHideChk = document.getElementById("qz-hide-pinyin");
+  if (qzHideChk) {
+    qzHideChk.checked = !!state.hidePinyin;
+    qzHideChk.addEventListener("change", () => {
+      state.hidePinyin = qzHideChk.checked;
+      saveState();
+      syncHidePinyinCheckboxes();
+    });
+  }
   document.getElementById("qz-start")?.addEventListener("click", () => {
     fillTopicSelect(qzTopicSel);
     const words = allWords().filter(w => qzTopicSel.value === "all" || w.topic === qzTopicSel.value);
@@ -3989,6 +4233,7 @@ function renderQuizQuestion() {
       <div class="options" id="qz-options"></div>
     </div>
   `;
+  applyHidePinyinToArea("qz-area");
 
   const optWrap = document.getElementById("qz-options");
   options.forEach(opt => {
@@ -4065,6 +4310,34 @@ function initTimedHandlers() {
   if (tmTopicSel) {
     tmTopicSel.addEventListener("change", renderTimedIdle);
   }
+  const tmHideChk = document.getElementById("tm-hide-pinyin");
+  if (tmHideChk) {
+    tmHideChk.checked = !!state.hidePinyin;
+    tmHideChk.addEventListener("change", () => {
+      state.hidePinyin = tmHideChk.checked;
+      saveState();
+      syncHidePinyinCheckboxes();
+    });
+  }
+}
+
+/* Đồng bộ 2 checkbox "Ẩn Pinyin" (Kiểm tra & Thử thách giờ) và áp dụng
+   ẩn/hiện ngay cho pinyin đang hiển thị trên màn hình, không cần mật khẩu GV. */
+function syncHidePinyinCheckboxes() {
+  const qzChk = document.getElementById("qz-hide-pinyin");
+  const tmChk = document.getElementById("tm-hide-pinyin");
+  if (qzChk) qzChk.checked = !!state.hidePinyin;
+  if (tmChk) tmChk.checked = !!state.hidePinyin;
+  applyHidePinyinToArea("qz-area");
+  applyHidePinyinToArea("tm-area");
+}
+
+function applyHidePinyinToArea(areaId) {
+  const area = document.getElementById(areaId);
+  if (!area) return;
+  area.querySelectorAll(".pinyin").forEach(el => {
+    el.style.display = state.hidePinyin ? "none" : "";
+  });
 }
 
 function renderTimedIdle() {
@@ -4166,6 +4439,7 @@ function renderTimedQuestion() {
       <div class="options" id="tm-options"></div>
     </div>
   `;
+  applyHidePinyinToArea("tm-area");
 
   const optWrap = document.getElementById("tm-options");
   let answered = false;
@@ -5281,6 +5555,7 @@ function initTeacherCMSHandlers() {
     };
     saveState();
     renderTeacherCMS();
+    pushSharedConfigNow().catch(() => {});
     alert(`Tạo lớp "${name}" thành công!`);
   });
 
@@ -5414,10 +5689,11 @@ function initTeacherCMSHandlers() {
   /* Announcement CMS */
   document.getElementById("cms-save-announcement-btn")?.addEventListener("click", () => {
     const text = document.getElementById("cms-announcement-input").value.trim();
-    state.gamification.announcement = text;
+    state.announcement = text;
+    state.gamification.announcement = text; // giữ đồng bộ cho code cũ còn tham chiếu
     saveState();
     updateGamificationUI();
-    alert("Đã ghim thông báo dặn dò!");
+    alert("Đã ghim thông báo dặn dò cho CẢ LỚP! Mọi học viên sẽ thấy trong ít giây.");
   });
 
   /* Reward Matrix CMS */
@@ -5471,6 +5747,11 @@ function initTeacherCMSHandlers() {
     await refreshServerRoster();
     refreshTeacherRosterUI();
     renderLeaderboardContent();
+
+    /* FIX: đăng lên Bảng Tin Lớp CHUNG để mọi học viên (không chỉ người
+       được cộng/trừ) đều thấy giáo viên vừa thao tác gì. */
+    const verb = amount >= 0 ? "được cộng" : "bị trừ";
+    addActivityLog(`👩‍🏫 Thầy/Cô vừa ${verb} ${Math.abs(amount)} Cành Trúc 🎋 cho ${displayName} — Lý do: ${reason}`);
 
     alert(`Thao tác thành công cho ${displayName}!`);
   });
@@ -5535,6 +5816,10 @@ function initTeacherCMSHandlers() {
     await refreshServerRoster();
     refreshTeacherRosterUI();
     renderLeaderboardContent();
+
+    /* FIX: đăng lên Bảng Tin Lớp CHUNG để mọi học viên đều thấy ai vừa
+       được trao huy hiệu, không chỉ riêng người được trao. */
+    addActivityLog(`🏅 ${displayName} vừa được Thầy/Cô trao huy hiệu: ${b.icon} ${b.title}!`);
 
     alert("Trao huy hiệu thành công!");
   });
@@ -5772,6 +6057,26 @@ function renderTimedRewardsManager() {
   });
 }
 
+/* Chuyển toàn bộ ghi danh học viên (sheet ClassMembers trên server) từ
+   tên lớp cũ sang tên lớp mới sau khi giáo viên đổi tên lớp, để Bảng Xếp
+   Hạng và danh sách học viên trong CMS tiếp tục hiển thị đúng theo tên
+   mới thay vì "biến mất" vì server vẫn lưu theo tên cũ. */
+async function migrateClassMembersOnRename(oldName, newName) {
+  try {
+    const res = await callServer("get_class_members", { className: oldName });
+    const members = (res && res.ok && Array.isArray(res.students)) ? res.students : [];
+    for (const m of members) {
+      await callServer("join_class", { className: newName, username: m.username, displayName: m.displayName });
+    }
+    await callServer("delete_class_members", { className: oldName });
+    if (state.currentClassName === newName) refreshServerRoster();
+  } catch (e) {
+    /* Không chặn luồng đổi tên nếu bước đồng bộ server thất bại (ví dụ
+       mất mạng) — giáo viên vẫn có thể thử lại sau, dữ liệu lớp cục bộ
+       (từ vựng, cấu hình...) đã đổi tên thành công rồi. */
+  }
+}
+
 function renderTeacherCMS() {
   /* Populate Class Lists */
   const cListWrap = document.getElementById("teacher-class-list-manage");
@@ -5785,7 +6090,7 @@ function renderTeacherCMS() {
         <div style="display:flex; gap:8px; flex-wrap:wrap;">
           <button class="btn btn-outline select-class-btn" data-name="${cName}" style="font-size:11px; padding:4px 8px;">Quản lý lớp này</button>
           <button class="btn btn-outline rename-class-btn" data-name="${cName}" style="font-size:11px; padding:4px 8px;">✏️ Sửa tên</button>
-          ${Object.keys(state.classes).length > 1 ? `<button class="btn btn-bad del-class-btn" data-name="${cName}" style="font-size:11px; padding:4px 8px;">Xóa</button>` : ''}
+          <button class="btn btn-bad del-class-btn" data-name="${cName}" style="font-size:11px; padding:4px 8px;">Xóa</button>
         </div>
       `;
       cListWrap.appendChild(row);
@@ -5840,6 +6145,14 @@ function renderTeacherCMS() {
           state.dictationSubmissions[trimmed] = state.dictationSubmissions[oldName];
           delete state.dictationSubmissions[oldName];
         }
+        /* FIX: state.classFeeds cũng lưu theo key = tên lớp (xem tính năng
+           "Bảng Tin tách riêng theo từng lớp") — nếu không di trú, đổi tên
+           lớp sẽ làm Bảng Tin của lớp đó "trống trơn" (tin cũ vẫn còn
+           nhưng nằm ở key tên CŨ, không ai đọc tới nữa). */
+        if (state.classFeeds && state.classFeeds[oldName] !== undefined) {
+          state.classFeeds[trimmed] = state.classFeeds[oldName];
+          delete state.classFeeds[oldName];
+        }
 
         if (state.currentClassName === oldName) {
           state.currentClassName = trimmed;
@@ -5847,6 +6160,24 @@ function renderTeacherCMS() {
 
         saveState();
         renderTeacherCMS();
+
+        /* Đẩy NGAY lên server (không đợi debounce) để tên mới không bị
+           "hoàn tác" nếu giáo viên thoát trang sớm — cùng lý do như khi
+           xóa lớp ở trên. */
+        pushSharedConfigNow().catch(() => {
+          alert("⚠️ Đổi tên cục bộ thành công nhưng chưa đồng bộ được lên server (có thể do mất mạng). Vui lòng kiểm tra kết nối và thử lại nếu tên lớp bị hoàn tác sau này.");
+        });
+
+        /* FIX: trước đây đổi tên lớp CHỈ đổi key trong state.classes
+           (từ vựng, mật khẩu, cấu hình...), nhưng danh sách "ai đang ở
+           lớp nào" (dùng cho Bảng Xếp Hạng, danh sách học viên trong
+           CMS...) lại nằm ở server, gắn với TÊN LỚP CŨ (sheet
+           ClassMembers). Kết quả: sau khi đổi tên, học viên "biến mất"
+           khỏi bảng xếp hạng vì server vẫn tìm theo tên cũ. Đoạn dưới
+           đây lấy danh sách thành viên theo tên cũ, ghi danh lại họ vào
+           tên mới, rồi xóa bản ghi theo tên cũ để không bị trùng. */
+        migrateClassMembersOnRename(oldName, trimmed);
+
         alert(`Đã đổi tên lớp thành "${trimmed}"!`);
       };
     });
@@ -5854,15 +6185,37 @@ function renderTeacherCMS() {
     cListWrap.querySelectorAll(".del-class-btn").forEach(btn => {
       btn.onclick = () => {
         const delName = btn.dataset.name;
-        if (confirm(`Xóa lớp "${delName}"?`)) {
+        /* Trước đây nút Xóa bị ẨN HOÀN TOÀN khi chỉ còn 1 lớp, khiến giáo
+           viên tưởng nút bị lỗi/không bấm được. Giờ nút luôn hiển thị,
+           nhưng nếu đây là lớp cuối cùng thì báo rõ lý do thay vì xóa
+           (xóa hết lớp sẽ làm app không còn lớp nào để hoạt động). */
+        if (Object.keys(state.classes).length <= 1) {
+          alert(`Không thể xóa "${delName}" vì đây là lớp duy nhất còn lại!\n\nHãy tạo thêm 1 lớp khác trước, rồi quay lại xóa lớp này.`);
+          return;
+        }
+        if (confirm(`Xóa lớp "${delName}"?\n\nToàn bộ từ vựng, cấu hình và bài nộp của lớp này sẽ bị xóa vĩnh viễn. Thao tác này không thể hoàn tác!`)) {
           delete state.classes[delName];
+          if (state.timedSubmissions && state.timedSubmissions[delName] !== undefined) delete state.timedSubmissions[delName];
+          if (state.dictationSubmissions && state.dictationSubmissions[delName] !== undefined) delete state.dictationSubmissions[delName];
+          if (state.classFeeds && state.classFeeds[delName] !== undefined) delete state.classFeeds[delName];
           state.currentClassName = Object.keys(state.classes)[0];
           saveState();
-          /* Dọn luôn danh sách ghi danh của lớp vừa xóa trên server, để
-             không sót thành viên "mồ côi" (thuộc về 1 lớp không còn tồn
-             tại) trong sheet ClassMembers. */
-          callServer("delete_class_members", { className: delName }).catch(() => {});
-          renderTeacherCMS();
+          btn.disabled = true;
+          /* Đẩy NGAY lên server (không đợi debounce 1.5s) và CHỜ xong mới
+             coi là xóa thành công — tránh trường hợp thoát trang quá
+             nhanh khiến lượt xóa chưa kịp lưu, rồi lớp bị "hồi sinh" ở
+             lần mở app sau. */
+          pushSharedConfigNow()
+            .catch(() => {
+              alert("⚠️ Xóa lớp cục bộ thành công nhưng chưa đồng bộ được lên server (có thể do mất mạng). Vui lòng kiểm tra kết nối mạng và thử lại, nếu không lớp có thể \"hiện lại\" ở lần mở app sau.");
+            })
+            .finally(() => {
+              /* Dọn luôn danh sách ghi danh của lớp vừa xóa trên server, để
+                 không sót thành viên "mồ côi" (thuộc về 1 lớp không còn tồn
+                 tại) trong sheet ClassMembers. */
+              callServer("delete_class_members", { className: delName }).catch(() => {});
+              renderTeacherCMS();
+            });
         }
       };
     });
@@ -5918,7 +6271,7 @@ function renderTeacherCMS() {
 
   /* Announcement & Reward Matrix */
   const annInp = document.getElementById("cms-announcement-input");
-  if (annInp) annInp.value = state.gamification.announcement || "";
+  if (annInp) annInp.value = state.announcement || state.gamification.announcement || "";
 
   const rm = state.gamification.rewardMatrix;
   if (document.getElementById("rm-quiz")) document.getElementById("rm-quiz").value = rm.quiz || 10;
@@ -6503,6 +6856,23 @@ function refreshActiveViewData() {
 
 /* Global Init */
 window.addEventListener("DOMContentLoaded", () => {
+  /* FIX: nếu còn 1 lượt đẩy cấu hình chung (đổi màu, tiêu đề, thêm/xóa
+     lớp...) đang chờ debounce (1.5s) mà giáo viên đóng/tải lại trang
+     ngay lúc đó, lượt lưu có thể bị hủy theo trang — lần mở app sau sẽ
+     kéo bản CŨ từ server về, "hoàn tác" thay đổi vừa làm. Trình duyệt
+     không cho JS tự gửi request có xác thực (apikey) một cách đáng tin
+     cậy khi trang đang đóng, nên cách an toàn nhất là NHẮC giáo viên
+     đợi vài giây thay vì đóng ngay — các thao tác quan trọng (xóa/đổi
+     tên/tạo lớp) đã tự đẩy ngay lập tức và chờ xong (xem
+     pushSharedConfigNow), nên cảnh báo này chỉ còn cần cho các thay đổi
+     nhỏ hơn (màu sắc, tiêu đề...) vẫn dùng debounce. */
+  window.addEventListener("beforeunload", (e) => {
+    if (_sharedConfigPushPending) {
+      e.preventDefault();
+      e.returnValue = "";
+    }
+  });
+
   applyCustomTheme();
   initAuthHandlers();
   initClassPasswordModalHandlers();
@@ -6605,6 +6975,8 @@ window.addEventListener("DOMContentLoaded", () => {
     await syncSharedConfigFromServer();
     await checkAutoSession();
     updateGamificationUI();
+    startVersionCheckWatcher();
+    checkForNewVersion();
   })();
 });
 
