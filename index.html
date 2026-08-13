@@ -805,8 +805,9 @@
     <div style="background:#FFEBEE; border:2px solid #EF9A9A; border-radius:14px; padding:12px; margin-bottom:14px; font-size:13px; color:#B71C1C; font-weight:700;">
       <div>📌 <strong>Luật Cướp Trúc:</strong></div>
       <ul style="margin:4px 0 0; padding-left:18px;">
-        <li>Giới hạn tối đa <strong>5 Cành Trúc / ngày</strong>.</li>
-        <li>Chỉ cướp được số Trúc ≤ số Trúc trong túi người bị cướp.</li>
+        <li>Mỗi lần bấm chỉ cướp được <strong>1 Cành Trúc</strong> của đối phương.</li>
+        <li>Giới hạn tối đa <strong>5 Cành Trúc / ngày</strong> (tối đa 5 lần cướp thành công/ngày).</li>
+        <li>Chỉ cướp được nếu túi Trúc của người bị cướp còn ≥ 1 Cành.</li>
         <li>Hành động cướp sẽ thông báo công khai lên Bảng Tin Lớp!</li>
       </ul>
       <div style="margin-top:8px; font-size:14px; color:#D32F2F;">
@@ -885,6 +886,7 @@
   <button data-view="timed"><span class="tab-icon">⚡</span><span class="tab-label">Thử thách giờ</span></button>
   <button data-view="wordchallenge"><span class="tab-icon">✍️</span><span class="tab-label">Đặt câu</span></button>
   <button data-view="grammar"><span class="tab-icon">📖</span><span class="tab-label">Ngữ pháp</span></button>
+  <button data-view="classtest" id="classtest-nav-btn" style="display:none;"><span class="tab-icon">📝</span><span class="tab-label">KT Trên Lớp</span></button>
   <button data-view="dictation"><span class="tab-icon">🎧</span><span class="tab-label">Chép chính tả</span></button>
   <button data-view="leaderboard"><span class="tab-icon">🏆</span><span class="tab-label">Xếp hạng</span></button>
   <button data-view="feed"><span class="tab-icon">📢</span><span class="tab-label">Bảng tin</span></button>
@@ -998,11 +1000,12 @@
   <section class="view" id="view-quiz">
     <div class="filters">
       <select id="qz-topic"></select>
-      <select id="qz-count">
-        <option value="10">10 câu</option>
-        <option value="20">20 câu</option>
-        <option value="9999">Tất cả</option>
-      </select>
+      <label style="font-size:13px; font-weight:700; display:flex; align-items:center; gap:6px;">
+        Số câu:
+        <input type="number" id="qz-count-input" min="1" value="10" style="width:70px;">
+      </label>
+      <button class="btn btn-outline" id="qz-count-all-btn" style="font-size:12px;">Tất cả</button>
+      <span id="qz-count-hint" style="font-size:11px; color:var(--ink-soft);"></span>
       <button class="btn btn-primary" id="qz-start">Bắt đầu kiểm tra 🐼 (+Trúc)</button>
       <label style="font-size:13px; font-weight:700; display:flex; align-items:center; gap:6px; cursor:pointer;">
         <input type="checkbox" id="qz-hide-pinyin" style="width:16px; height:16px; cursor:pointer;">
@@ -1052,6 +1055,11 @@
       <span id="grammar-submit-status" style="font-size:13px; font-weight:700; color:var(--ink-soft);">Hoàn thành bài tập để nộp.</span>
       <button class="btn btn-ok" id="submit-grammar-btn">Nộp bài ngữ pháp 🚀 (+Trúc)</button>
     </div>
+  </section>
+
+  <!-- ============ CLASS TEST (KIỂM TRA TRÊN LỚP) VIEW ============ -->
+  <section class="view" id="view-classtest">
+    <div id="classtest-student-area"></div>
   </section>
 
   <!-- ============ DICTATION VIEW ============ -->
@@ -1270,6 +1278,49 @@
         <button class="btn btn-outline" id="grammar-export-submissions-btn" style="margin-top:12px;">⬇️ Xuất file bài nộp Ngữ Pháp (CSV)</button>
       </div>
 
+      <!-- CLASS TEST (KIỂM TRA TRÊN LỚP) CMS -->
+      <div style="background:var(--card-bg); border:3px solid var(--paper-darker); border-radius:22px; padding:20px; margin-bottom:20px;">
+        <h4 style="margin:0 0 4px; color:var(--seal-dark); font-family:var(--serif);">📝 Quản Lý Kiểm Tra Trên Lớp</h4>
+        <p style="margin:0 0 10px; font-size:12px; color:var(--ink-soft); font-weight:600;">Mục này MẶC ĐỊNH ẨN với học sinh. Nhập file CSV (Hán tự, Pinyin, Nghĩa) để tạo 1 List kiểm tra, rồi bấm "Bắt đầu" khi tới giờ — lúc đó tab "📝 KT Trên Lớp" mới hiện ra cho học sinh.</p>
+
+        <div style="background:var(--paper); border:2px solid var(--jade); border-radius:16px; padding:16px; margin-bottom:14px;">
+          <h5 style="margin:0 0 8px; color:var(--seal-dark);">📂 List Kiểm Tra</h5>
+          <div style="display:grid; grid-template-columns:1fr auto; gap:10px; align-items:end; margin-bottom:10px;">
+            <div>
+              <label style="font-size:12px; font-weight:700;">Chọn List đã lưu (có thể dùng lại)</label>
+              <select id="classtest-list-select" style="width:100%;"></select>
+              <div id="classtest-list-info" style="font-size:11px; color:var(--ink-soft); margin-top:4px;"></div>
+            </div>
+            <button class="btn btn-bad" id="classtest-delete-list-btn" style="white-space:nowrap;">🗑️ Xóa List Này</button>
+          </div>
+          <input type="file" id="classtest-csv-file" accept=".csv" style="display:none;">
+          <button class="btn btn-outline" id="classtest-csv-trigger-btn">⬆️ Nhập CSV → Tạo List Mới (Hán tự, Pinyin, Nghĩa)</button>
+        </div>
+
+        <div style="background:var(--paper); border:2px solid var(--paper-darker); border-radius:16px; padding:16px; margin-bottom:14px;">
+          <h5 style="margin:0 0 8px; color:var(--seal-dark);">⚙️ Cấu Hình & Điều Khiển Bài Kiểm Tra</h5>
+          <div style="display:flex; gap:14px; flex-wrap:wrap; align-items:center; margin-bottom:12px;">
+            <label style="font-size:13px; font-weight:700; display:flex; align-items:center; gap:6px;">
+              <input type="checkbox" id="classtest-hide-pinyin"> Ẩn Pinyin (tăng độ khó)
+            </label>
+            <label style="font-size:13px; font-weight:700; display:flex; align-items:center; gap:6px;">
+              Thời gian làm bài (phút):
+              <input type="number" id="classtest-duration" min="1" max="180" value="15" style="width:70px;">
+            </label>
+          </div>
+          <div style="display:flex; gap:10px; flex-wrap:wrap;">
+            <button class="btn btn-ok" id="classtest-start-btn">🚀 Bắt Đầu Kiểm Tra (hiện đề cho học sinh)</button>
+            <button class="btn btn-bad" id="classtest-force-close-btn">⛔ Đóng Bài Kiểm Tra Ngay</button>
+          </div>
+          <div id="classtest-status" style="margin-top:12px; font-size:13px; font-weight:700; color:var(--ink-soft); background:rgba(0,0,0,0.03); border-radius:10px; padding:10px 14px;"></div>
+        </div>
+
+        <div style="background:var(--paper); border:2px solid var(--paper-darker); border-radius:16px; padding:16px;">
+          <h5 style="margin:0 0 8px; color:var(--seal-dark);">📥 Bài Nộp (phiên hiện tại)</h5>
+          <div id="classtest-submissions-list" style="display:flex; flex-direction:column; gap:6px;"></div>
+        </div>
+      </div>
+
       <!-- VIDEO DICTATION CMS -->
       <div style="background:var(--card-bg); border:3px solid var(--paper-darker); border-radius:22px; padding:20px; margin-bottom:20px;">
         <h4 style="margin:0 0 10px; color:var(--seal-dark); font-family:var(--serif);">🎧 Quản Lý Bài Tập Video Chép Chính Tả</h4>
@@ -1310,11 +1361,25 @@
         <div id="tl-timed-rewards-list" style="display:flex; flex-direction:column; gap:8px;"></div>
       </div>
 
+      <!-- SỐ CÂU TỐI THIỂU MỤC KIỂM TRA CMS -->
+      <div style="background:var(--card-bg); border:3px solid var(--paper-darker); border-radius:22px; padding:20px; margin-bottom:20px;">
+        <h4 style="margin:0 0 10px; color:var(--seal-dark); font-family:var(--serif);">📝 Số Câu Tối Thiểu Mục Kiểm Tra (Lớp Hiện Tại)</h4>
+        <p style="font-size:12px; color:var(--ink-soft); margin-bottom:14px;">Ở mục Kiểm Tra, học viên có thể tự chọn số câu muốn làm (hoặc bấm "Tất cả"), nhưng không được chọn ít hơn số câu tối thiểu do Thầy/Cô cấu hình. Thầy/Cô có thể đặt riêng số câu tối thiểu cho từng list bên dưới; list nào không tùy chỉnh riêng sẽ dùng mức mặc định chung.</p>
+
+        <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:16px; background:var(--paper); padding:12px 14px; border-radius:14px; border:2px solid var(--paper-darker);">
+          <label style="font-size:13px; font-weight:700;">Số câu tối thiểu mặc định (áp dụng cho list chưa tùy chỉnh riêng):</label>
+          <input type="number" id="tl-qz-min-count" min="1" value="5" style="width:90px;">
+          <button class="btn btn-primary" id="tl-save-qz-min-btn" style="font-size:12px; padding:8px 14px;">Lưu Mức Mặc Định</button>
+        </div>
+
+        <h5 style="margin:0 0 8px; color:var(--seal-dark);">Tùy Chỉnh Riêng Theo Từng List:</h5>
+        <div id="tl-qz-min-list" style="display:flex; flex-direction:column; gap:8px;"></div>
+      </div>
+
       <!-- REWARD MATRIX CMS -->
       <div style="background:var(--card-bg); border:3px solid var(--paper-darker); border-radius:22px; padding:20px; margin-bottom:20px;">
         <h4 style="margin:0 0 10px; color:var(--seal-dark); font-family:var(--serif);">🎋 Cấu Hình Tỷ Lệ Thưởng Trúc (Reward Matrix)</h4>
         <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
-          <div><label style="font-size:12px; font-weight:700;">Thưởng Quiz (Cành):</label><input type="number" id="rm-quiz" value="10"></div>
           <div><label style="font-size:12px; font-weight:700;">Thưởng Thử Thách Thời Gian (mặc định, khi list chưa cấu hình riêng):</label><input type="number" id="rm-timed" value="10"></div>
           <div><label style="font-size:12px; font-weight:700;">Thưởng Chép Chính Tả:</label><input type="number" id="rm-dictation" value="15"></div>
           <div><label style="font-size:12px; font-weight:700;">Thưởng Đặt Câu:</label><input type="number" id="rm-sentence" value="15"></div>
@@ -1322,6 +1387,18 @@
           <div><label style="font-size:12px; font-weight:700;">Thưởng Streak 7 Ngày:</label><input type="number" id="rm-streak" value="30"></div>
         </div>
         <button class="btn btn-primary" id="cms-save-reward-btn" style="margin-top:12px;">Lưu Tỷ Lệ Thưởng 🎋</button>
+      </div>
+
+      <!-- QUIZ REWARD TIERS CMS -->
+      <div style="background:var(--card-bg); border:3px solid var(--paper-darker); border-radius:22px; padding:20px; margin-bottom:20px;">
+        <h4 style="margin:0 0 10px; color:var(--seal-dark); font-family:var(--serif);">🎯 Cấu Hình Trúc Theo % Đúng (Mục Kiểm Tra)</h4>
+        <p style="font-size:12px; color:var(--ink-soft); margin-bottom:14px;">Đúng <strong>100%</strong> nhận full Trúc. Đúng <strong>dưới ngưỡng %</strong> bên dưới thì <strong>không nhận Trúc</strong>. Đúng ở khoảng giữa ngưỡng % và 100% thì nhận Trúc theo tỷ lệ nội suy giữa 2 mức.</p>
+        <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px;">
+          <div><label style="font-size:12px; font-weight:700;">Ngưỡng % tối thiểu để nhận Trúc:</label><input type="number" id="rm-qz-threshold-pct" min="0" max="100" value="50"></div>
+          <div><label style="font-size:12px; font-weight:700;">Trúc tại đúng ngưỡng %:</label><input type="number" id="rm-qz-threshold-reward" min="0" value="3"></div>
+          <div><label style="font-size:12px; font-weight:700;">Trúc khi đúng 100%:</label><input type="number" id="rm-qz-full-reward" min="0" value="10"></div>
+        </div>
+        <button class="btn btn-primary" id="cms-save-qz-tiers-btn" style="margin-top:12px;">Lưu Cấu Hình Trúc Theo % 🎯</button>
       </div>
 
       <!-- GRANT / DEDUCT BAMBOO CMS -->
@@ -1976,6 +2053,24 @@ function renderLightspeedPanel() {
 }
 
 /* Default Application State */
+/* KIỂM TRA TRÊN LỚP: đảm bảo mỗi lớp luôn có đủ cấu trúc dữ liệu cho
+   tính năng này, để tránh lỗi undefined khi đọc dữ liệu cũ (localStorage/
+   server) chưa từng có mục này. */
+function ensureClassTestDefaults(cData) {
+  if (!cData || typeof cData !== "object") return;
+  if (!Array.isArray(cData.classTest?.lists)) {
+    cData.classTest = cData.classTest && typeof cData.classTest === "object" ? cData.classTest : {};
+    cData.classTest.lists = Array.isArray(cData.classTest.lists) ? cData.classTest.lists : [];
+  }
+  if (!cData.classTest.active || typeof cData.classTest.active !== "object") {
+    cData.classTest.active = {
+      sessionId: null, listId: null, visible: false,
+      hidePinyin: false, durationMinutes: 15, startedAt: null, closed: false
+    };
+  }
+  if (!Array.isArray(cData.classTest.submissions)) cData.classTest.submissions = [];
+}
+
 function sanitizeState(s) {
   if (!s || typeof s !== "object") s = {};
 
@@ -2035,6 +2130,7 @@ function sanitizeState(s) {
       if (!cData.timedMinSplitCounts || typeof cData.timedMinSplitCounts !== "object") cData.timedMinSplitCounts = {};
       if (!cData.timedSplitRewards || typeof cData.timedSplitRewards !== "object") cData.timedSplitRewards = {};
       if (typeof cData.password !== "string") cData.password = "123";
+      ensureClassTestDefaults(cData);
     }
   });
 
@@ -2085,7 +2181,7 @@ function sanitizeState(s) {
   }
 
   if (!g.rewardMatrix || typeof g.rewardMatrix !== "object") {
-    g.rewardMatrix = { quiz: 10, timed: 10, dictation: 15, sentence: 15, grammar: 20, streak: 30 };
+    g.rewardMatrix = { quiz: 10, timed: 10, dictation: 15, sentence: 15, grammar: 20, streak: 30, classTest: 25 };
   } else {
     if (typeof g.rewardMatrix.quiz !== "number") g.rewardMatrix.quiz = 10;
     if (typeof g.rewardMatrix.timed !== "number") g.rewardMatrix.timed = 10;
@@ -2093,6 +2189,20 @@ function sanitizeState(s) {
     if (typeof g.rewardMatrix.sentence !== "number") g.rewardMatrix.sentence = 15;
     if (typeof g.rewardMatrix.grammar !== "number") g.rewardMatrix.grammar = 20;
     if (typeof g.rewardMatrix.streak !== "number") g.rewardMatrix.streak = 30;
+    if (typeof g.rewardMatrix.classTest !== "number") g.rewardMatrix.classTest = 25;
+  }
+
+  /* Cấu hình Trúc theo % đúng cho mục Kiểm Tra (Quiz):
+     - Dưới passThreshold% : không nhận Trúc (0)
+     - Đúng đúng passThreshold% : nhận rewardAtThreshold Trúc
+     - Đúng 100% : nhận rewardFull Trúc
+     - Ở giữa passThreshold% và 100% : nội suy tuyến tính giữa 2 mức trên */
+  if (!g.quizRewardTiers || typeof g.quizRewardTiers !== "object") {
+    g.quizRewardTiers = { passThreshold: 50, rewardAtThreshold: 3, rewardFull: 10 };
+  } else {
+    if (typeof g.quizRewardTiers.passThreshold !== "number") g.quizRewardTiers.passThreshold = 50;
+    if (typeof g.quizRewardTiers.rewardAtThreshold !== "number") g.quizRewardTiers.rewardAtThreshold = 3;
+    if (typeof g.quizRewardTiers.rewardFull !== "number") g.quizRewardTiers.rewardFull = 10;
   }
 
   if (typeof g.announcement !== "string") {
@@ -2638,8 +2748,9 @@ async function pollLiveUpdates() {
   const activeView = document.querySelector("section.view.active");
   const vId = activeView ? activeView.id : "";
   if (vId === "view-leaderboard") renderLeaderboardContent();
-  if (vId === "view-teacher-lists") refreshTeacherRosterUI();
+  if (vId === "view-teacher-lists") { refreshTeacherRosterUI(); renderClassTestTeacherManager(); }
   if (vId === "view-feed") renderActivityFeed();
+  updateClassTestNavVisibility();
   updateGamificationUI();
 }
 
@@ -2785,6 +2896,7 @@ function getCurrentClassData() {
   if (!Array.isArray(cData.customWords)) cData.customWords = [];
   if (!Array.isArray(cData.grammarSections)) cData.grammarSections = [];
   if (!Array.isArray(cData.grammarSubmissions)) cData.grammarSubmissions = [];
+  ensureClassTestDefaults(cData);
   return cData;
 }
 
@@ -2833,6 +2945,33 @@ function getTimedSplitReward(topic) {
   const custom = cData.timedSplitRewards[topic];
   if (typeof custom === "number" && custom > 0) return custom;
   return Math.max(1, Math.floor(getTimedListReward(topic) / 2));
+}
+
+/* Số câu tối thiểu học viên phải chọn khi làm mục Kiểm Tra: ưu tiên số giáo viên đã tùy chỉnh
+   riêng cho từng list (topic), nếu list đó chưa cấu hình riêng thì dùng mức tối thiểu mặc định chung. */
+function getQuizMinCount(topic) {
+  if (topic && topic !== "all") {
+    const cData = getCurrentClassData();
+    const custom = cData?.qzMinCounts?.[topic];
+    if (typeof custom === "number" && custom > 0) return custom;
+  }
+  return (typeof state.qzMinCount === "number" && state.qzMinCount > 0) ? state.qzMinCount : 5;
+}
+
+/* Tính số Trúc thưởng cho bài Kiểm Tra dựa trên % đúng, theo cấu hình giáo viên:
+   - Dưới ngưỡng passThreshold%: 0 Trúc
+   - Đúng 100%: rewardFull Trúc
+   - Ở giữa: nội suy tuyến tính giữa rewardAtThreshold (tại passThreshold%) và rewardFull (tại 100%) */
+function computeQuizReward(pct) {
+  const tiers = state.gamification?.quizRewardTiers || { passThreshold: 50, rewardAtThreshold: 3, rewardFull: 10 };
+  const passThreshold = tiers.passThreshold;
+  const rewardAtThreshold = tiers.rewardAtThreshold;
+  const rewardFull = tiers.rewardFull;
+  if (pct < passThreshold) return 0;
+  if (pct >= 100) return rewardFull;
+  if (passThreshold >= 100) return rewardFull;
+  const ratio = (pct - passThreshold) / (100 - passThreshold);
+  return Math.max(0, Math.round(rewardAtThreshold + (rewardFull - rewardAtThreshold) * ratio));
 }
 
 function fillTopicSelect(sel, includeAll = true) {
@@ -3221,6 +3360,7 @@ async function enterClass(cName) {
   await refreshServerRoster();
   updateGamificationUI();
   renderActivityFeed(); // FIX: đổi lớp -> hiện ngay Bảng Tin của lớp MỚI, không lẫn tin của lớp cũ
+  updateClassTestNavVisibility();
   if (state.role === "teacher") {
     refreshActiveViewData();
   } else {
@@ -3852,7 +3992,7 @@ function renderStealModal() {
   });
 }
 
-function stealBambooFromPeer(peerName) {
+async function stealBambooFromPeer(peerName) {
   checkResetDailySteals();
   const g = state.gamification;
   const stolenToday = g.dailySteals?.count || 0;
@@ -3865,14 +4005,33 @@ function stealBambooFromPeer(peerName) {
   const peer = (g.peers || []).find(p => p.name === peerName);
   if (!peer) return alert("Không tìm thấy học viên này!");
 
+  if (!peer.username) {
+    return alert("Danh sách bạn học chưa đồng bộ xong, vui lòng thử lại sau giây lát! 🐼");
+  }
+
   if ((peer.bambooPouch || 0) <= 0) {
     return alert(`Túi Trúc của ${peer.name} đang trống (0 Cành Trúc), không thể cướp! 🐼`);
   }
 
-  const maxStealable = Math.min(quotaRem, peer.bambooPouch);
-  const stolenAmt = Math.min(maxStealable, Math.floor(Math.random() * 2) + 1);
+  /* FIX: mỗi lần bấm chỉ cướp đúng 1 Cành Trúc (trước đây random 1-2),
+     và tối đa 5 Cành Trúc/ngày (tức tối đa 5 lần bấm thành công/ngày). */
+  const stolenAmt = Math.min(1, quotaRem, peer.bambooPouch);
 
-  peer.bambooPouch = Math.max(0, peer.bambooPouch - stolenAmt);
+  /* FIX QUAN TRỌNG: trước đây chỉ trừ trúc trên bản sao cục bộ (g.peers)
+     trong máy của người cướp — không hề ghi lên server, nên người bị
+     cướp KHÔNG thực sự mất trúc (lần đồng bộ roster kế tiếp sẽ kéo lại
+     đúng số trúc cũ từ server, coi như "cướp hụt"). Giờ gọi thẳng RPC
+     grant_bamboo với amount ÂM để trừ đúng vào bản ghi THẬT của người bị
+     cướp trên server — giống cách giáo viên cộng/trừ trúc cho học viên. */
+  const reason = `Bị ${state.studentName || "một bạn học"} cướp trúc 🐾`;
+  const res = await callServer("grant_bamboo", { username: peer.username, amount: -stolenAmt, reason });
+
+  if (!res || !res.ok) {
+    return alert("❌ Cướp trúc thất bại, không kết nối được máy chủ:\n" + describeServerError(res));
+  }
+
+  /* Cập nhật lại bản sao cục bộ theo đúng số dư server vừa xác nhận */
+  peer.bambooPouch = (typeof res.bambooPouch === "number") ? res.bambooPouch : Math.max(0, peer.bambooPouch - stolenAmt);
   g.bambooPouch += stolenAmt;
   g.dailySteals.count += stolenAmt;
 
@@ -3883,6 +4042,7 @@ function stealBambooFromPeer(peerName) {
   updateGamificationUI();
   renderStealModal();
   renderLeaderboardContent();
+  refreshServerRoster().then(renderStealModal);
   playSound("correct");
   alert(`🐾 CƯỚP THÀNH CÔNG! Gấu trúc của bạn vừa cướp +${stolenAmt} Cành Trúc của ${peer.name}! Thông báo đã được phát lên Bảng Tin Lớp 📢`);
 }
@@ -3922,6 +4082,12 @@ function feedPanda(amount) {
   if (!g) return;
   if (amount <= 0 || g.bambooPouch <= 0) {
     alert("Túi Trúc của bạn đang trống! Hãy hoàn thành bài tập để tích thêm Cành Trúc nhé 🎋");
+    return;
+  }
+  const currentLevel = calcLevelDetails(g.totalXp).level;
+  if (currentLevel >= SPIRIT_ANIMAL_REQUIRED_LEVEL && !g.spiritAnimal) {
+    alert(`Gấu Trúc đã đạt Level ${SPIRIT_ANIMAL_REQUIRED_LEVEL}! Hãy Hóa Hình Linh Thú trước khi tiếp tục cho ăn Trúc để lên Level nhé 🌟`);
+    openTransformModal();
     return;
   }
   const toFeed = Math.min(amount, g.bambooPouch);
@@ -4188,6 +4354,30 @@ const qzTopicSel = document.getElementById("qz-topic");
 const qzArea = document.getElementById("qz-area");
 let qzQueue = [], qzIdx = 0, qzScore = 0;
 
+let qzUseAll = false;
+
+/* Cập nhật gợi ý (tối thiểu / tối đa) và giá trị mặc định của ô nhập số câu
+   dựa trên list/chủ đề đang chọn + cấu hình tối thiểu của giáo viên cho list đó. */
+function updateQuizCountHint() {
+  const countInp = document.getElementById("qz-count-input");
+  const hint = document.getElementById("qz-count-hint");
+  if (!countInp) return;
+  const words = allWords().filter(w => qzTopicSel.value === "all" || w.topic === qzTopicSel.value);
+  const total = words.length;
+  const minCount = Math.min(getQuizMinCount(qzTopicSel.value), Math.max(total, 1));
+  countInp.min = minCount;
+  countInp.max = total || 1;
+  if (!qzUseAll) {
+    if (!countInp.value || parseInt(countInp.value, 10) < minCount) countInp.value = minCount;
+    if (parseInt(countInp.value, 10) > total) countInp.value = total;
+    countInp.disabled = false;
+  } else {
+    countInp.value = total;
+    countInp.disabled = true;
+  }
+  if (hint) hint.textContent = total ? `(tối thiểu ${minCount}, tối đa ${total} câu)` : "";
+}
+
 function initQuizHandlers() {
   const qzHideChk = document.getElementById("qz-hide-pinyin");
   if (qzHideChk) {
@@ -4198,6 +4388,17 @@ function initQuizHandlers() {
       syncHidePinyinCheckboxes();
     });
   }
+  if (qzTopicSel) {
+    qzTopicSel.addEventListener("change", () => { qzUseAll = false; updateQuizCountHint(); });
+  }
+  document.getElementById("qz-count-all-btn")?.addEventListener("click", () => {
+    qzUseAll = !qzUseAll;
+    const btn = document.getElementById("qz-count-all-btn");
+    if (btn) btn.classList.toggle("btn-primary", qzUseAll);
+    updateQuizCountHint();
+  });
+  fillTopicSelect(qzTopicSel);
+  updateQuizCountHint();
   document.getElementById("qz-start")?.addEventListener("click", () => {
     fillTopicSelect(qzTopicSel);
     const words = allWords().filter(w => qzTopicSel.value === "all" || w.topic === qzTopicSel.value);
@@ -4205,7 +4406,18 @@ function initQuizHandlers() {
       qzArea.innerHTML = '<div class="empty-note">Cần ít nhất 4 từ vựng trong list này để làm trắc nghiệm!</div>';
       return;
     }
-    const countLimit = parseInt(document.getElementById("qz-count").value) || 10;
+    updateQuizCountHint();
+    const minCount = getQuizMinCount(qzTopicSel.value);
+    let countLimit;
+    if (qzUseAll) {
+      countLimit = words.length;
+    } else {
+      countLimit = parseInt(document.getElementById("qz-count-input")?.value, 10) || minCount;
+      if (countLimit < minCount) {
+        alert(`List này yêu cầu kiểm tra tối thiểu ${minCount} câu! Vui lòng chọn số câu lớn hơn hoặc bằng ${minCount}, hoặc bấm "Tất cả".`);
+        return;
+      }
+    }
     qzQueue = shuffle(words).slice(0, Math.min(countLimit, words.length));
     qzIdx = 0;
     qzScore = 0;
@@ -4275,15 +4487,23 @@ function renderQuizQuestion() {
 
 function renderQuizResult() {
   const pct = Math.round((qzScore / qzQueue.length) * 100);
-  const rewardAmt = state.gamification.rewardMatrix.quiz || 10;
+  const rewardAmt = computeQuizReward(pct);
   if (!state.gamification.counters) state.gamification.counters = {};
   state.gamification.counters.quizCount = (state.gamification.counters.quizCount || 0) + 1;
-  grantBamboo(rewardAmt, `Hoàn thành Bài Kiểm Tra Quiz (${pct}%)`);
+  if (rewardAmt > 0) {
+    grantBamboo(rewardAmt, `Hoàn thành Bài Kiểm Tra Quiz (${pct}%)`);
+  } else {
+    saveState();
+  }
+
+  const rewardLine = rewardAmt > 0
+    ? `Xuất sắc! Bạn đạt ${pct}% câu trả lời đúng 🐼 (+${rewardAmt} Trúc 🎋)`
+    : `Bạn đạt ${pct}% câu trả lời đúng. Cố gắng thêm để đạt mức tối thiểu và nhận Trúc nhé 🐼 (+0 Trúc)`;
 
   qzArea.innerHTML = `
     <div class="quiz-box">
       <div style="font-family:var(--serif); font-size:48px; color:var(--seal-dark); font-weight:800;">${qzScore} / ${qzQueue.length}</div>
-      <p style="font-weight:700; margin:10px 0;">Xuất sắc! Bạn đạt ${pct}% câu trả lời đúng 🐼 (+${rewardAmt} Trúc 🎋)</p>
+      <p style="font-weight:700; margin:10px 0;">${rewardLine}</p>
       <div style="display:flex; justify-content:center; gap:10px; margin-top:14px;">
         <button class="btn btn-primary" id="qz-again">Làm lại bài kiểm tra</button>
         <button class="btn btn-outline" id="qz-zalo">📲 Gửi kết quả cho Thầy Marcus qua Zalo</button>
@@ -4798,6 +5018,362 @@ function initGrammarHandlers() {
     grammarActiveSectionId = null;
     renderGrammarStudent();
   });
+}
+
+/* =========================================================
+   5B. KIỂM TRA TRÊN LỚP (CLASS TEST — teacher-controlled live test)
+   ---------------------------------------------------------
+   - Giáo viên nhập CSV (Hán tự, Pinyin, Nghĩa) tạo 1 List, có thể lưu
+     nhiều List để dùng lại về sau, hoặc xóa List cũ.
+   - Giáo viên bấm "Bắt Đầu" -> active.visible=true + startedAt=now,
+     tab "KT Trên Lớp" hiện ra cho học sinh (đồng bộ qua SHARED_FIELDS
+     "classes", polling mỗi 8s - xem pollLiveUpdates/LIVE_SYNC_INTERVAL_MS).
+   - Học sinh gõ nghĩa từng từ, bấm Nộp -> lưu vào classTest.submissions
+     + gửi Google Sheet qua sendAnswerToGoogleSheet().
+   - Hết giờ (đếm ngược riêng theo máy học sinh) -> tự nộp.
+   - Giáo viên bấm "Đóng Ngay" -> active.closed=true -> học sinh (đang mở
+     máy) phát hiện qua vòng poll kế tiếp, tự nộp bài dở dang rồi bị đưa
+     về giao diện Vườn Trúc.
+   ========================================================= */
+let classTestCountdownTimer = null;
+
+function ctGenId(prefix) {
+  return prefix + "_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7);
+}
+
+function parseClassTestCsv(text) {
+  const lines = text.split("\n");
+  const words = [];
+  for (let i = 1; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (!line) continue;
+    const parts = line.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/).map(p => p.replace(/^"|"$/g, "").trim());
+    if (parts.length >= 3 && parts[0]) {
+      words.push({ id: ctGenId("ctw"), hanzi: parts[0], pinyin: parts[1], meaning: parts[2] });
+    }
+  }
+  return words;
+}
+
+function fillClassTestListSelect() {
+  const sel = document.getElementById("classtest-list-select");
+  if (!sel) return;
+  const cData = getCurrentClassData();
+  const prev = sel.value;
+  sel.innerHTML = "";
+  if (cData.classTest.lists.length === 0) {
+    sel.innerHTML = `<option value="">(Chưa có List nào — nhập CSV để tạo)</option>`;
+  } else {
+    cData.classTest.lists.forEach(l => {
+      const opt = document.createElement("option");
+      opt.value = l.id;
+      opt.textContent = `${l.name} (${l.words.length} từ)`;
+      sel.appendChild(opt);
+    });
+    if (prev && cData.classTest.lists.find(l => l.id === prev)) sel.value = prev;
+    else if (cData.classTest.active.listId && cData.classTest.lists.find(l => l.id === cData.classTest.active.listId)) sel.value = cData.classTest.active.listId;
+  }
+  updateClassTestListInfo();
+}
+
+function updateClassTestListInfo() {
+  const sel = document.getElementById("classtest-list-select");
+  const info = document.getElementById("classtest-list-info");
+  if (!sel || !info) return;
+  const cData = getCurrentClassData();
+  const list = cData.classTest.lists.find(l => l.id === sel.value);
+  info.textContent = list ? `Ví dụ: ${list.words.slice(0, 3).map(w => w.hanzi).join(", ")}${list.words.length > 3 ? "..." : ""}` : "";
+}
+
+function renderClassTestStatus() {
+  const box = document.getElementById("classtest-status");
+  if (!box) return;
+  const cData = getCurrentClassData();
+  const active = cData.classTest.active;
+  const list = cData.classTest.lists.find(l => l.id === active.listId);
+
+  if (!active.listId || (!active.visible && !active.closed)) {
+    box.innerHTML = "⚪ Hiện chưa có bài kiểm tra nào đang mở cho học sinh.";
+    return;
+  }
+  const roster = (serverRoster.length ? serverRoster : []).filter(s => s.role !== "teacher");
+  const subs = (cData.classTest.submissions || []).filter(s => s.sessionId === active.sessionId);
+  const deadline = (active.startedAt || 0) + (active.durationMinutes || 15) * 60000;
+  const remainMs = deadline - Date.now();
+  const remainTxt = remainMs > 0 ? `${Math.ceil(remainMs / 60000)} phút` : "Đã hết giờ";
+
+  if (active.closed) {
+    box.innerHTML = `🔴 Đã ĐÓNG bài kiểm tra "<strong>${escapeHtml(list ? list.name : "")}</strong>". Bài nộp: ${subs.length}${roster.length ? "/" + roster.length : ""}.`;
+  } else {
+    box.innerHTML = `🟢 Đang mở bài kiểm tra "<strong>${escapeHtml(list ? list.name : "")}</strong>" (${list ? list.words.length : 0} từ) · Còn lại: ${remainTxt} · Đã nộp: ${subs.length}${roster.length ? "/" + roster.length : ""}.`;
+  }
+}
+
+function renderClassTestSubmissionsList() {
+  const wrap = document.getElementById("classtest-submissions-list");
+  if (!wrap) return;
+  const cData = getCurrentClassData();
+  const active = cData.classTest.active;
+  const subs = (cData.classTest.submissions || []).filter(s => s.sessionId === active.sessionId);
+  if (subs.length === 0) {
+    wrap.innerHTML = '<div class="empty-note">Chưa có học sinh nào nộp bài trong phiên hiện tại.</div>';
+    return;
+  }
+  wrap.innerHTML = subs.map(s => `
+    <div style="display:flex; justify-content:space-between; background:var(--card-bg); border:2px solid var(--paper-darker); border-radius:10px; padding:8px 12px; font-size:12px;">
+      <span><strong>${escapeHtml(s.studentName)}</strong> ${s.autoSubmitted ? "· <span style=\"color:#B45309;\">tự động nộp</span>" : ""}</span>
+      <span style="color:var(--ink-soft);">${s.submittedAt}</span>
+    </div>
+  `).join("");
+}
+
+function renderClassTestTeacherManager() {
+  fillClassTestListSelect();
+  renderClassTestStatus();
+  renderClassTestSubmissionsList();
+  const cData = getCurrentClassData();
+  const hideChk = document.getElementById("classtest-hide-pinyin");
+  const durInput = document.getElementById("classtest-duration");
+  if (hideChk) hideChk.checked = !!cData.classTest.active.hidePinyin;
+  if (durInput) durInput.value = cData.classTest.active.durationMinutes || 15;
+}
+
+function initClassTestTeacherHandlers() {
+  document.getElementById("classtest-list-select")?.addEventListener("change", updateClassTestListInfo);
+
+  document.getElementById("classtest-csv-trigger-btn")?.addEventListener("click", () => {
+    document.getElementById("classtest-csv-file")?.click();
+  });
+
+  document.getElementById("classtest-csv-file")?.addEventListener("change", (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      const words = parseClassTestCsv(evt.target.result);
+      if (words.length === 0) {
+        alert("Không đọc được từ nào từ file CSV. Định dạng cần: Hán tự,Pinyin,Nghĩa");
+        e.target.value = "";
+        return;
+      }
+      const name = prompt(`Đặt tên cho List kiểm tra mới (${words.length} từ):`, `List KT ${new Date().toLocaleDateString("vi-VN")}`);
+      if (name === null) { e.target.value = ""; return; }
+      const cData = getCurrentClassData();
+      const list = { id: ctGenId("ctlist"), name: name.trim() || "List KT", words, createdAt: Date.now() };
+      cData.classTest.lists.push(list);
+      saveState();
+      fillClassTestListSelect();
+      document.getElementById("classtest-list-select").value = list.id;
+      updateClassTestListInfo();
+      alert(`Đã tạo List "${list.name}" với ${words.length} từ!`);
+      e.target.value = "";
+    };
+    reader.readAsText(file);
+  });
+
+  document.getElementById("classtest-delete-list-btn")?.addEventListener("click", () => {
+    const sel = document.getElementById("classtest-list-select");
+    const cData = getCurrentClassData();
+    const list = cData.classTest.lists.find(l => l.id === sel.value);
+    if (!list) return alert("Chưa chọn List nào để xóa!");
+    if (!confirm(`Xóa hẳn List "${list.name}"? Thao tác này không thể hoàn tác.`)) return;
+    cData.classTest.lists = cData.classTest.lists.filter(l => l.id !== list.id);
+    if (cData.classTest.active.listId === list.id && !cData.classTest.active.closed) {
+      cData.classTest.active.visible = false;
+      cData.classTest.active.closed = true;
+    }
+    saveState();
+    fillClassTestListSelect();
+    renderClassTestStatus();
+  });
+
+  document.getElementById("classtest-start-btn")?.addEventListener("click", () => {
+    const sel = document.getElementById("classtest-list-select");
+    const cData = getCurrentClassData();
+    const list = cData.classTest.lists.find(l => l.id === sel.value);
+    if (!list) return alert("Vui lòng chọn (hoặc nhập CSV tạo) 1 List trước khi bắt đầu!");
+    const durationMinutes = Math.max(1, parseInt(document.getElementById("classtest-duration").value) || 15);
+    const hidePinyin = !!document.getElementById("classtest-hide-pinyin").checked;
+    if (!confirm(`Bắt đầu kiểm tra với List "${list.name}" (${list.words.length} từ), thời gian ${durationMinutes} phút?\n\nTab "📝 KT Trên Lớp" sẽ hiện ra cho học sinh ngay sau đó.`)) return;
+
+    cData.classTest.active = {
+      sessionId: ctGenId("sess"),
+      listId: list.id,
+      visible: true,
+      hidePinyin,
+      durationMinutes,
+      startedAt: Date.now(),
+      closed: false
+    };
+    saveState();
+    pushSharedConfigNow().catch(() => {
+      alert("⚠️ Đã bắt đầu cục bộ nhưng chưa đồng bộ được lên server (có thể do mất mạng). Vui lòng kiểm tra kết nối và thử lại nếu học sinh chưa thấy đề.");
+    });
+    renderClassTestTeacherManager();
+    updateClassTestNavVisibility();
+    alert("✅ Đã mở bài kiểm tra cho học sinh!");
+  });
+
+  document.getElementById("classtest-force-close-btn")?.addEventListener("click", () => {
+    const cData = getCurrentClassData();
+    if (!cData.classTest.active.visible && !cData.classTest.active.listId) return alert("Hiện không có bài kiểm tra nào đang mở.");
+    if (!confirm("Đóng bài kiểm tra NGAY? Toàn bộ học sinh chưa nộp sẽ bị tự động nộp bài dở dang và đưa về Vườn Trúc.")) return;
+    cData.classTest.active.closed = true;
+    cData.classTest.active.visible = false;
+    saveState();
+    pushSharedConfigNow().catch(() => {
+      alert("⚠️ Đã đóng cục bộ nhưng chưa đồng bộ được lên server. Vui lòng kiểm tra kết nối mạng và thử lại.");
+    });
+    renderClassTestTeacherManager();
+    updateClassTestNavVisibility();
+  });
+}
+
+/* Hiện/ẩn tab "KT Trên Lớp" trên thanh nav tùy trạng thái active.visible.
+   Giáo viên (đã mở khóa CMS) luôn thấy tab này để tiện xem trước/theo dõi. */
+function updateClassTestNavVisibility() {
+  const btn = document.getElementById("classtest-nav-btn");
+  if (!btn) return;
+  const cData = getCurrentClassData();
+  const active = cData.classTest.active;
+  const dash = document.getElementById("teacher-dashboard");
+  const isTeacherUnlocked = dash && dash.style.display !== "none";
+  const shouldShow = (active.visible && !active.closed && active.listId) || isTeacherUnlocked;
+  btn.style.display = shouldShow ? "" : "none";
+
+  /* Nếu học sinh đang ở đúng màn hình này mà bài đã bị đóng/ẩn -> tự nộp
+     bài dở dang (nếu chưa nộp) rồi đưa về Vườn Trúc. */
+  const activeViewEl = document.querySelector("section.view.active");
+  if (activeViewEl && activeViewEl.id === "view-classtest" && !isTeacherUnlocked && (active.closed || !active.visible)) {
+    submitClassTest(true, active.closed ? "⏰ Giáo viên đã đóng bài kiểm tra, bài của bạn đã được tự động nộp!" : null);
+    activateView("pandahome");
+  }
+}
+
+function renderClassTestStudent() {
+  const area = document.getElementById("classtest-student-area");
+  if (!area) return;
+  clearInterval(classTestCountdownTimer);
+  const cData = getCurrentClassData();
+  const active = cData.classTest.active;
+  const list = cData.classTest.lists.find(l => l.id === active.listId);
+
+  if (!active.visible || active.closed || !list) {
+    area.innerHTML = '<div class="empty-note">Hiện chưa có bài kiểm tra nào được mở. Vui lòng chờ thầy cô nhé!</div>';
+    return;
+  }
+
+  const mySub = (cData.classTest.submissions || []).find(s => s.sessionId === active.sessionId && s.studentName === state.studentName);
+  const deadline = (active.startedAt || Date.now()) + (active.durationMinutes || 15) * 60000;
+
+  if (mySub) {
+    area.innerHTML = `
+      <div style="background:#fffdf4; border:2px solid var(--jade); border-radius:18px; padding:14px 16px; margin-bottom:16px;">
+        <strong style="color:var(--seal-dark); font-family:var(--serif); font-size:17px;">✅ Bạn đã nộp bài kiểm tra "${escapeHtml(list.name)}"</strong>
+        <div style="font-size:12px; color:var(--ink-soft); margin-top:4px;">Nộp lúc ${mySub.submittedAt}${mySub.autoSubmitted ? " (tự động nộp do hết giờ / giáo viên đóng bài)" : ""}. Kết quả sẽ được thầy cô kiểm tra qua Google Sheet.</div>
+      </div>
+    `;
+    return;
+  }
+
+  area.innerHTML = `
+    <div style="background:#fffdf4; border:2px solid var(--jade); border-radius:18px; padding:14px 16px; margin-bottom:16px;">
+      <strong style="color:var(--seal-dark); font-family:var(--serif); font-size:17px;">📝 Bài Kiểm Tra: ${escapeHtml(list.name)}</strong>
+      <div style="font-size:12px; color:var(--ink-soft); margin-top:4px;">Gõ nghĩa của từng từ bên dưới. Làm xong bấm <strong>Nộp Bài</strong>. Hết giờ hoặc giáo viên đóng bài, hệ thống sẽ tự động nộp giúp bạn.</div>
+      <div id="classtest-countdown" style="margin-top:8px; font-weight:800; color:var(--seal);"></div>
+    </div>
+    <div id="classtest-words-area"></div>
+    <div style="display:flex; justify-content:flex-end; margin-top:16px;">
+      <button class="btn btn-ok" id="classtest-submit-btn">Nộp Bài Kiểm Tra 🚀</button>
+    </div>
+  `;
+
+  const wordsArea = document.getElementById("classtest-words-area");
+  list.words.forEach((w, idx) => {
+    const card = document.createElement("div");
+    card.style.cssText = "background:var(--card-bg); border:2px solid var(--paper-darker); border-radius:16px; padding:14px; margin-bottom:10px; display:flex; gap:14px; align-items:center; flex-wrap:wrap;";
+    card.innerHTML = `
+      <div style="min-width:110px;">
+        <div class="hanzi" style="font-family:var(--serif); font-size:26px; color:var(--ink);">${escapeHtml(w.hanzi)}</div>
+        ${active.hidePinyin ? "" : `<div class="pinyin" style="color:var(--ink-soft); font-size:13px;">${escapeHtml(w.pinyin)}</div>`}
+      </div>
+      <input type="text" class="classtest-ans-input" data-word="${w.id}" style="flex:1; min-width:160px;" placeholder="Nghĩa của từ ${idx + 1}...">
+    `;
+    wordsArea.appendChild(card);
+  });
+
+  document.getElementById("classtest-submit-btn")?.addEventListener("click", () => {
+    submitClassTest(false);
+  });
+
+  const tick = () => {
+    const el = document.getElementById("classtest-countdown");
+    const remainMs = deadline - Date.now();
+    if (remainMs <= 0) {
+      if (el) el.textContent = "⏰ Đã hết giờ — đang tự động nộp bài...";
+      submitClassTest(true, "⏰ Hết giờ! Bài của bạn đã được tự động nộp.");
+      activateView("pandahome");
+      return;
+    }
+    if (el) {
+      const m = Math.floor(remainMs / 60000);
+      const sec = Math.floor((remainMs % 60000) / 1000);
+      el.textContent = `⏳ Thời gian còn lại: ${m}:${String(sec).padStart(2, "0")}`;
+    }
+  };
+  tick();
+  classTestCountdownTimer = setInterval(tick, 1000);
+}
+
+function submitClassTest(auto = false, toastMsg = null) {
+  const cData = getCurrentClassData();
+  const active = cData.classTest.active;
+  const list = cData.classTest.lists.find(l => l.id === active.listId);
+  if (!list || !active.sessionId) return;
+
+  const already = (cData.classTest.submissions || []).find(s => s.sessionId === active.sessionId && s.studentName === state.studentName);
+  if (already) { if (toastMsg) showToast(toastMsg, "warning"); return; }
+
+  const inputs = document.querySelectorAll(".classtest-ans-input");
+  const answers = list.words.map(w => {
+    const inp = inputs ? Array.from(inputs).find(i => i.dataset.word === w.id) : null;
+    return { wordId: w.id, hanzi: w.hanzi, pinyin: w.pinyin, correctMeaning: w.meaning, studentAnswer: (inp?.value || "").trim() };
+  });
+
+  const submission = {
+    id: ctGenId("ctsub"),
+    sessionId: active.sessionId,
+    listId: list.id,
+    listName: list.name,
+    studentName: state.studentName,
+    submittedAt: new Date().toLocaleString("vi-VN"),
+    autoSubmitted: !!auto,
+    answers
+  };
+  cData.classTest.submissions.push(submission);
+
+  const rewardAmt = state.gamification?.rewardMatrix?.classTest || 25;
+  grantBamboo(rewardAmt, `Bài Kiểm Tra: ${list.name}`);
+  saveState();
+
+  const summaryText = answers.map((a, i) => `${i + 1}. ${a.hanzi} (${a.pinyin}) — Học sinh trả lời: "${a.studentAnswer}" | Đáp án: "${a.correctMeaning}"`).join("\n");
+
+  sendAnswerToGoogleSheet({
+    activity: "class_test",
+    className: state.currentClassName,
+    studentName: state.studentName,
+    listName: list.name,
+    sessionId: active.sessionId,
+    autoSubmitted: !!auto,
+    sentence: summaryText,
+    answer: summaryText,
+    answersJson: JSON.stringify(answers)
+  });
+
+  if (toastMsg) showToast(toastMsg, "warning");
+  else showToast("✅ Nộp bài kiểm tra thành công!", "success");
+
+  clearInterval(classTestCountdownTimer);
 }
 
 /* =========================================================
@@ -5699,7 +6275,6 @@ function initTeacherCMSHandlers() {
   /* Reward Matrix CMS */
   document.getElementById("cms-save-reward-btn")?.addEventListener("click", () => {
     const rm = state.gamification.rewardMatrix;
-    rm.quiz = parseInt(document.getElementById("rm-quiz").value) || 10;
     rm.timed = parseInt(document.getElementById("rm-timed").value) || 10;
     rm.dictation = parseInt(document.getElementById("rm-dictation").value) || 15;
     rm.sentence = parseInt(document.getElementById("rm-sentence").value) || 15;
@@ -5707,6 +6282,29 @@ function initTeacherCMSHandlers() {
     rm.streak = parseInt(document.getElementById("rm-streak").value) || 30;
     saveState();
     alert("Lưu Tỷ lệ Thưởng Trúc thành công!");
+  });
+
+  /* Quiz Reward Tiers CMS (Trúc theo % đúng ở mục Kiểm Tra) */
+  document.getElementById("cms-save-qz-tiers-btn")?.addEventListener("click", () => {
+    const threshold = Math.max(0, Math.min(100, parseInt(document.getElementById("rm-qz-threshold-pct").value, 10)));
+    const thresholdReward = Math.max(0, parseInt(document.getElementById("rm-qz-threshold-reward").value, 10) || 0);
+    const fullReward = Math.max(0, parseInt(document.getElementById("rm-qz-full-reward").value, 10) || 0);
+    if (isNaN(threshold)) return alert("Vui lòng nhập ngưỡng % hợp lệ (0-100)!");
+    state.gamification.quizRewardTiers = {
+      passThreshold: threshold,
+      rewardAtThreshold: thresholdReward,
+      rewardFull: fullReward
+    };
+    saveState();
+    alert("Lưu Cấu Hình Trúc Theo % Đúng thành công!");
+  });
+
+  /* Số câu tối thiểu mặc định mục Kiểm Tra */
+  document.getElementById("tl-save-qz-min-btn")?.addEventListener("click", () => {
+    const val = parseInt(document.getElementById("tl-qz-min-count").value, 10) || 5;
+    state.qzMinCount = Math.max(1, val);
+    saveState();
+    alert(`Đã lưu số câu tối thiểu mặc định mục Kiểm Tra: ${state.qzMinCount} câu!`);
   });
 
   /* Grant / Deduct Bamboo — FIX: trước đây luôn cộng/trừ vào tài khoản
@@ -6057,6 +6655,61 @@ function renderTimedRewardsManager() {
   });
 }
 
+/* Quản lý số câu tối thiểu mục Kiểm Tra (Quiz) cho từng list — cùng cơ chế
+   "mặc định chung + tùy chỉnh riêng theo topic" như Thử Thách Thời Gian. */
+function renderQuizMinManager() {
+  const wrap = document.getElementById("tl-qz-min-list");
+  if (!wrap) return;
+  const cData = getCurrentClassData();
+  if (!cData.qzMinCounts || typeof cData.qzMinCounts !== "object") cData.qzMinCounts = {};
+  const topics = topicList();
+  const defaultMin = getQuizMinCount();
+
+  if (topics.length === 0) {
+    wrap.innerHTML = '<div class="empty-note">Lớp này chưa có list / chủ đề từ vựng nào.</div>';
+    return;
+  }
+
+  wrap.innerHTML = "";
+  topics.forEach(t => {
+    const wCount = allWords().filter(w => w.topic === t).length;
+    const currentMin = (typeof cData.qzMinCounts[t] === "number" && cData.qzMinCounts[t] > 0)
+      ? cData.qzMinCounts[t] : "";
+    const row = document.createElement("div");
+    row.style.cssText = "display:flex; align-items:center; gap:10px; flex-wrap:wrap; background:var(--paper); padding:10px 14px; border-radius:14px; border:2px solid var(--paper-darker);";
+    row.innerHTML = `
+      <div style="flex:1; min-width:140px;">
+        <strong style="font-size:13px;">${t}</strong>
+        <div style="font-size:11px; color:var(--ink-soft);">${wCount} từ</div>
+      </div>
+      <label style="font-size:12px; font-weight:700; display:flex; align-items:center; gap:6px;">
+        Số câu tối thiểu:
+        <input type="number" class="tl-qz-min-input" data-topic="${t}" min="1" placeholder="${defaultMin} (mặc định)" value="${currentMin}" style="width:90px;">
+      </label>
+      <button class="btn btn-primary tl-qz-min-save-btn" data-topic="${t}" style="font-size:12px; padding:7px 12px;">Lưu</button>
+    `;
+    wrap.appendChild(row);
+  });
+
+  wrap.querySelectorAll(".tl-qz-min-save-btn").forEach(btn => {
+    btn.onclick = () => {
+      const topic = btn.dataset.topic;
+      const minInput = wrap.querySelector(`.tl-qz-min-input[data-topic="${CSS.escape(topic)}"]`);
+      const minVal = parseInt(minInput?.value, 10);
+      const cData2 = getCurrentClassData();
+      if (!cData2.qzMinCounts || typeof cData2.qzMinCounts !== "object") cData2.qzMinCounts = {};
+      if (minVal > 0) {
+        cData2.qzMinCounts[topic] = minVal;
+      } else {
+        delete cData2.qzMinCounts[topic];
+      }
+      saveState();
+      alert(`Đã lưu số câu tối thiểu mục Kiểm Tra cho "${topic}"!`);
+      renderQuizMinManager();
+    };
+  });
+}
+
 /* Chuyển toàn bộ ghi danh học viên (sheet ClassMembers trên server) từ
    tên lớp cũ sang tên lớp mới sau khi giáo viên đổi tên lớp, để Bảng Xếp
    Hạng và danh sách học viên trong CMS tiếp tục hiển thị đúng theo tên
@@ -6078,6 +6731,8 @@ async function migrateClassMembersOnRename(oldName, newName) {
 }
 
 function renderTeacherCMS() {
+  renderClassTestTeacherManager();
+  updateClassTestNavVisibility();
   /* Populate Class Lists */
   const cListWrap = document.getElementById("teacher-class-list-manage");
   if (cListWrap) {
@@ -6274,12 +6929,16 @@ function renderTeacherCMS() {
   if (annInp) annInp.value = state.announcement || state.gamification.announcement || "";
 
   const rm = state.gamification.rewardMatrix;
-  if (document.getElementById("rm-quiz")) document.getElementById("rm-quiz").value = rm.quiz || 10;
   if (document.getElementById("rm-timed")) document.getElementById("rm-timed").value = rm.timed || 10;
   if (document.getElementById("rm-dictation")) document.getElementById("rm-dictation").value = rm.dictation || 15;
   if (document.getElementById("rm-sentence")) document.getElementById("rm-sentence").value = rm.sentence || 15;
   if (document.getElementById("rm-grammar")) document.getElementById("rm-grammar").value = rm.grammar || 20;
   if (document.getElementById("rm-streak")) document.getElementById("rm-streak").value = rm.streak || 30;
+
+  const qzTiers = state.gamification.quizRewardTiers || { passThreshold: 50, rewardAtThreshold: 3, rewardFull: 10 };
+  if (document.getElementById("rm-qz-threshold-pct")) document.getElementById("rm-qz-threshold-pct").value = qzTiers.passThreshold;
+  if (document.getElementById("rm-qz-threshold-reward")) document.getElementById("rm-qz-threshold-reward").value = qzTiers.rewardAtThreshold;
+  if (document.getElementById("rm-qz-full-reward")) document.getElementById("rm-qz-full-reward").value = qzTiers.rewardFull;
 
   /* Award Badges Dropdown (danh sách huy hiệu — vẫn thuộc cấu hình cục bộ
      của giáo viên, KHÔNG phải danh sách học viên nên giữ nguyên ở đây) */
@@ -6306,7 +6965,12 @@ function renderTeacherCMS() {
   const minSplitInp = document.getElementById("tl-min-split-count");
   if (minSplitInp) minSplitInp.value = getTimedMinSplitCount();
 
+  /* Số câu tối thiểu mặc định mục Kiểm Tra */
+  const qzMinInp = document.getElementById("tl-qz-min-count");
+  if (qzMinInp) qzMinInp.value = getQuizMinCount();
+
   renderTimedRewardsManager();
+  renderQuizMinManager();
   renderGrammarTeacherManager();
   renderTeacherVideoManagerList();
   renderTeacherWordList();
@@ -6842,10 +7506,11 @@ function refreshActiveViewData() {
   const vId = activeView.id;
   if (vId === "view-pandahome") updateGamificationUI();
   if (vId === "view-flashcard") buildFcDeck();
-  if (vId === "view-quiz") fillTopicSelect(qzTopicSel);
+  if (vId === "view-quiz") { fillTopicSelect(qzTopicSel); updateQuizCountHint(); }
   if (vId === "view-timed") renderTimedIdle();
   if (vId === "view-wordchallenge") fillTopicSelect(wcTopicSel);
   if (vId === "view-grammar") renderGrammarStudent();
+  if (vId === "view-classtest") renderClassTestStudent();
   if (vId === "view-dictation") initDictationView();
   if (vId === "view-leaderboard") initLeaderboardView();
   if (vId === "view-feed") renderActivityFeed();
@@ -6882,10 +7547,12 @@ window.addEventListener("DOMContentLoaded", () => {
   initTimedHandlers();
   initWordChallengeHandlers();
   initGrammarHandlers();
+  initClassTestTeacherHandlers();
   initDictationControls();
   initLeaderboardView();
   initManageHandlers();
   initTeacherCMSHandlers();
+  updateClassTestNavVisibility();
 
   document.getElementById("gh-feed-nav-btn")?.addEventListener("click", () => {
     feedPanda(1);
@@ -6975,6 +7642,7 @@ window.addEventListener("DOMContentLoaded", () => {
     await syncSharedConfigFromServer();
     await checkAutoSession();
     updateGamificationUI();
+    updateClassTestNavVisibility();
     startVersionCheckWatcher();
     checkForNewVersion();
   })();
