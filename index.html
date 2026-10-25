@@ -425,6 +425,7 @@ function openCfg(){
   '<label id="secL">Mỗi từ hiện: '+cfg.sec+' giây</label><input type="range" min="1" max="10" step="1" value="'+cfg.sec+'" oninput="setC(\'sec\',+this.value)">'+
   '<label class="chk"><input type="checkbox" '+(cfg.vo?'checked':'')+' onchange="setC(\'vo\',this.checked)">Đọc to (cần bật âm thanh)</label>'+
   '<label class="chk"><input type="checkbox" '+(cfg.lp?'checked':'')+' onchange="setC(\'lp\',this.checked)">Hết lượt thì tự trộn và lặp lại (tắt = dừng lại)</label>'+
+  '<label class="chk"><input type="checkbox" '+(cfg.ml!==false?'checked':'')+' onchange="setC(\'ml\',this.checked)">Nhận diện bàn tay bằng AI (chuẩn hơn; vẩy bằng bàn tay, cần mạng lần đầu)</label>'+
   '<label class="chk"><input type="checkbox" '+(cfg.gh===true?'checked':'')+' onchange="setC(\'gh\',this.checked)">Thử nhận cả bàn tay/đầu không cầm bút (dễ nhảy nhầm — nếu tự nhảy từ thì TẮT mục này)</label>'+
   '<label id="gsL">Độ nhạy cử chỉ tay: '+(cfg.gs||1.0).toFixed(1)+'</label><input type="range" min="0.6" max="2.2" step="0.1" value="'+(cfg.gs||1.0)+'" oninput="setC(\'gs\',+this.value);$(\'gsL\').textContent=\'Độ nhạy cử chỉ tay: \'+(+this.value).toFixed(1)">'+
   '<div class="hint">Cao hơn = nhận được cả ngón tay, đầu bút nhỏ, nhưng dễ nhận nhầm hơn khi bạn đang chạy. Nhận nhầm nhiều thì hạ xuống.</div>'+
@@ -826,8 +827,94 @@ document.addEventListener('visibilitychange',function(){if(document.visibilitySt
     return {dir:hz?(dx>0?1:-1):0,up:up,spd:spd};
   }
 
+
+  /* ---------- Chế độ AI: nhận diện bàn tay bằng MediaPipe Hand Landmarker ---------- */
+  var LM=null,lmLoading=false,lmFail=false,mlH=[],handSince=0,absentSince=0,stillSince=0,revLock=false,mlLastDir=0,mlLastSpd=0,mlLastT=0,mlLastTs=0;
+  var MPV='0.10.14',MPB='https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@'+MPV,
+      MPM='https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task';
+  async function lmLoad(){
+    if(LM||lmLoading||lmFail)return;lmLoading=true;
+    try{
+      toast('Đang tải AI nhận diện bàn tay (lần đầu hơi lâu)…');
+      var mod=await import(MPB+'/vision_bundle.mjs');
+      var fs=await mod.FilesetResolver.forVisionTasks(MPB+'/wasm');
+      var mk=function(dl){return mod.HandLandmarker.createFromOptions(fs,{baseOptions:{modelAssetPath:MPM,delegate:dl},runningMode:'VIDEO',numHands:1,minHandDetectionConfidence:0.5,minHandPresenceConfidence:0.5,minTrackingConfidence:0.5})};
+      try{LM=await mk('GPU')}catch(e1){LM=await mk('CPU')}
+      toast('AI bàn tay đã sẵn sàng');
+    }catch(e){lmFail=true;toast('Không tải được AI bàn tay ('+((e&&e.message)||e)+'). Đang dùng chế độ cũ.')}
+    lmLoading=false;
+  }
+  function dst(a,b){var dx=a.x-b.x,dy=a.y-b.y;return Math.sqrt(dx*dx+dy*dy)}
+  function revealNow(){var mm=document.querySelector('[data-k="0"] .m');if(mm)rev(mm)}
+  function mlTick(now){
+    var ts=performance.now();if(ts<=mlLastTs)ts=mlLastTs+1;mlLastTs=ts;
+    var res=LM.detectForVideo(vid,ts),hd=res&&res.landmarks&&res.landmarks[0];
+    ox.clearRect(0,0,W,H);
+    if(!hd){
+      if(!absentSince)absentSince=now;
+      if(now-absentSince>350){mlH=[];handSince=0;stillSince=0;revLock=false}
+      lbl.textContent='· chờ tay';return;
+    }
+    absentSince=0;if(!handSince)handSince=now;
+    ox.fillStyle='#16b97a';
+    for(var i=0;i<hd.length;i++){ox.beginPath();ox.arc(hd[i].x*W,hd[i].y*H,2,0,6.283);ox.fill()}
+    var ids=[0,5,9,13,17],cxp=0,cyp=0;
+    for(var j=0;j<ids.length;j++){cxp+=hd[ids[j]].x;cyp+=hd[ids[j]].y}
+    cxp/=5;cyp/=5;
+    var mx=1-cxp,size=dst(hd[0],hd[9])||0.1;
+    mlH.push({t:now,x:mx,y:cyp});
+    while(mlH.length&&now-mlH[0].t>380)mlH.shift();
+    lbl.textContent='🖐 AI: thấy tay';
+    if(now<cool||now-handSince<300)return;
+
+    var s=sens(),rs=Math.sqrt(s);
+    /* vẩy ngang / vẩy lên */
+    if(mlH.length>=4){
+      var f=mlH[0],l=mlH[mlH.length-1],dt=(l.t-f.t)/1000;
+      if(dt>=0.12){
+        var dx=l.x-f.x,dy=l.y-f.y,ax=Math.abs(dx),ay=Math.abs(dy);
+        var need=Math.min(0.30,Math.max(0.13,1.3*size))/rs;
+        var hz=ax>=need&&ax>=2*ay,up=dy<0&&ay>=need*0.9&&ay>=2*ax;
+        if(hz||up){
+          var spd=(hz?ax:ay)/dt;
+          var same=0,n=0;
+          for(var q=1;q<mlH.length;q++){var dd=hz?(mlH[q].x-mlH[q-1].x)*dx:(mlH[q].y-mlH[q-1].y)*dy;n++;if(dd>=0)same++}
+          if(spd>=0.55/rs&&(!n||same/n>=0.7)){
+            var dir=hz?(dx>0?1:-1):0;
+            if(hz&&now-mlLastT<700&&dir!==mlLastDir&&spd<mlLastSpd*0.9)return; /* cú kéo tay về */
+            mlH=[];stillSince=0;revLock=true;
+            if(up){cool=now+800;flash('rv');revealNow();return}
+            mlLastDir=dir;mlLastSpd=spd;mlLastT=now;cool=now+600;
+            flash(dir>0?'ok':'no');
+            toast(dir>0?'🖐 → Đã thuộc':'🖐 ← Ôn lại');
+            fly(dir);return;
+          }
+        }
+      }
+    }
+    /* giữ bàn tay mở yên ~0,65s = hiện nghĩa */
+    if(!revLock){
+      var open=[[8,6],[12,10],[16,14],[20,18]].every(function(p){return dst(hd[p[0]],hd[0])>dst(hd[p[1]],hd[0])*1.08});
+      var still=false;
+      if(mlH.length>=5&&now-mlH[0].t>250){
+        var x0=1,x1=0,y0=1,y1=0;
+        for(var k=0;k<mlH.length;k++){var e=mlH[k];if(e.x<x0)x0=e.x;if(e.x>x1)x1=e.x;if(e.y<y0)y0=e.y;if(e.y>y1)y1=e.y}
+        still=(x1-x0)<0.03&&(y1-y0)<0.03;
+      }
+      if(open&&still){
+        if(!stillSince)stillSince=now;
+        else if(now-stillSince>650){stillSince=0;revLock=true;cool=now+1200;flash('rv');revealNow()}
+      }else stillSince=0;
+    }
+  }
+
   function tick(){
     if(!stream||!vid.videoWidth)return;
+    if(cfg.ml!==false&&!lmFail){
+      if(!LM){lmLoad();lbl.textContent='⏳ tải AI…';return}
+      try{mlTick(Date.now())}catch(e){lmFail=true;toast('Lỗi AI bàn tay, chuyển về chế độ cũ')}
+      return;
+    }
     var now=Date.now(),fdt=lastFT?Math.min(0.25,Math.max(0.02,(now-lastFT)/1000)):0.04;lastFT=now;
     cx.drawImage(vid,0,0,W,H);
     var d=cx.getImageData(0,0,W,H).data,g=(hist.length>=4?hist.shift():POOL[hist.length]),sum=0,hs=HS;hs.fill(0);
@@ -929,6 +1016,7 @@ document.addEventListener('visibilitychange',function(){if(document.visibilitySt
       var b=document.getElementById('gestBtn');if(b)b.classList.remove('on');return false}
     vid.srcObject=stream;try{await vid.play()}catch(e){}
     armed=false;quietSince=0;hist=[];trP=[];trA=[];vt=[];vtH=[];lastDir=0;lastSpd=0;lastFT=0;blockOpp=false;base=null;covered=false;cool=Date.now()+1500;
+    mlH=[];handSince=0;absentSince=0;stillSince=0;revLock=false;if(cfg.ml!==false)lmLoad();
     box.classList.add('on');document.getElementById('gestBtn').classList.add('on');
     schedule();
     return true;
@@ -943,7 +1031,8 @@ document.addEventListener('visibilitychange',function(){if(document.visibilitySt
     if(stream){cfg.gest=false;gestOff();toast('Đã tắt điều khiển bằng tay')}
     else{
       var ok=await gestOn();cfg.gest=ok;
-      if(ok)toast('Vẩy bút sang phải = Đã thuộc · trái = Ôn lại · vẩy lên hoặc che camera = hiện nghĩa');
+      if(ok&&cfg.ml!==false&&!lmFail)toast('Vẩy bàn tay sang phải = Đã thuộc · trái = Ôn lại · vẩy lên hoặc giữ bàn tay mở yên = hiện nghĩa');
+      else if(ok)toast('Vẩy bút sang phải = Đã thuộc · trái = Ôn lại · vẩy lên hoặc che camera = hiện nghĩa');
     }
     try{localStorage.setItem('vocab-cfg',JSON.stringify(cfg))}catch(e){}
   };
