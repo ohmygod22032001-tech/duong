@@ -883,7 +883,7 @@ document.addEventListener('visibilitychange',function(){if(document.visibilitySt
             var dir=hz?(dx>0?1:-1):0;
             if(hz&&now-mlLastT<700&&dir!==mlLastDir&&spd<mlLastSpd*0.9)return; /* cú kéo tay về */
             mlH=[];stillSince=0;revLock=true;
-            if(up){cool=now+800;flash('rv');revealNow();return}
+            if(up){cool=now+300;return}
             mlLastDir=dir;mlLastSpd=spd;mlLastT=now;cool=now+600;
             flash(dir>0?'ok':'no');
             toast(dir>0?'🖐 → Đã thuộc':'🖐 ← Ôn lại');
@@ -893,7 +893,7 @@ document.addEventListener('visibilitychange',function(){if(document.visibilitySt
       }
     }
     /* giữ bàn tay mở yên ~0,65s = hiện nghĩa */
-    if(!revLock){
+    if(false&&!revLock){
       var open=[[8,6],[12,10],[16,14],[20,18]].every(function(p){return dst(hd[p[0]],hd[0])>dst(hd[p[1]],hd[0])*1.08});
       var still=false;
       if(mlH.length>=5&&now-mlH[0].t>250){
@@ -924,7 +924,7 @@ document.addEventListener('visibilitychange',function(){if(document.visibilitySt
     if(base===null)base=mean;
     if(mean<base*0.45){
       if(!covered){covered=true;coverT=now}
-      else if(coverT&&now-coverT>600&&now>cool){coverT=0;cool=now+1400;flash('rv');var m=document.querySelector('[data-k="0"] .m');if(m)rev(m)}
+      else if(coverT&&now-coverT>600&&now>cool){coverT=0;cool=now+1400}
       hist=[];trP=[];trA=[];vt=[];vtH=[];return;
     }else{covered=false;coverT=0;base=base*0.97+mean*0.03}
 
@@ -989,7 +989,7 @@ document.addEventListener('visibilitychange',function(){if(document.visibilitySt
     if(!r&&hOn){r=evalFlow(now,s);if(r)r.src='flow'}
     if(!r)return;
     trP=[];trA=[];vt=[];vtH=[];
-    if(r.up){cool=now+600;flash('rv');var mm=document.querySelector('[data-k="0"] .m');if(mm)rev(mm);return}
+    if(r.up){cool=now+600;return}
     /* nét kéo tay về thường chậm hơn cú hất: chỉ nhận ngược chiều khi tay đã nghỉ hoặc cú mới nhanh hơn rõ rệt */
     if(blockOpp&&r.dir!==lastDir&&r.spd<lastSpd*0.9)return;
     lastDir=r.dir;lastT=now;lastSpd=r.spd;cool=now+(r.src==='flow'?700:350);blockOpp=true;lastMoveT=now;if(r.src==='flow'){armed=false;quietSince=0}
@@ -1031,8 +1031,8 @@ document.addEventListener('visibilitychange',function(){if(document.visibilitySt
     if(stream){cfg.gest=false;gestOff();toast('Đã tắt điều khiển bằng tay')}
     else{
       var ok=await gestOn();cfg.gest=ok;
-      if(ok&&cfg.ml!==false&&!lmFail)toast('Vẩy bàn tay sang phải = Đã thuộc · trái = Ôn lại · vẩy lên hoặc giữ bàn tay mở yên = hiện nghĩa');
-      else if(ok)toast('Vẩy bút sang phải = Đã thuộc · trái = Ôn lại · vẩy lên hoặc che camera = hiện nghĩa');
+      if(ok&&cfg.ml!==false&&!lmFail)toast('Vẩy bàn tay sang phải = Đã thuộc · trái = Ôn lại ');
+      else if(ok)toast('Vẩy bút sang phải = Đã thuộc · trái = Ôn lại ');
     }
     try{localStorage.setItem('vocab-cfg',JSON.stringify(cfg))}catch(e){}
   };
