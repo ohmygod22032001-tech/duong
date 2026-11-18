@@ -995,6 +995,33 @@ background:rgba(22,12,52,.84);-webkit-backdrop-filter:blur(18px);backdrop-filter
 #study[data-th=pr] #cmb b,#study[data-th=pr] #colb{background:rgba(255,255,255,.85)}
 #study .stage{z-index:6}
 #study[data-th=sm] .card .w{animation:none;background-position:30% 0}
+
+/* ===== 🔄 LẬT THẺ MƯỢT (v3) =====
+   - một chuyển động xoay liền mạch 0°→180°, nhanh nhất đúng lúc thẻ nằm nghiêng (không còn khựng ở 90°)
+   - nhấc thẻ lên nhẹ bằng thuộc tính scale riêng, nối tiếp với nhịp "lấy đà" trước khi lật
+   - quầng sáng cầu vồng chỉ hiện SAU khi lật xong (không còn mảng màu phẳng phía sau lúc thẻ đang xoay) */
+@keyframes dgflip3{from{transform:rotateY(0deg)}to{transform:rotateY(180deg)}}
+@keyframes dglift3{0%{scale:1.03}50%{scale:1.07}100%{scale:1}}
+@keyframes dgant3{to{scale:1.03}}
+.dgo.chg:not(.fl) .dgi{animation:dgant3 .25s cubic-bezier(.3,.6,.4,1) forwards}
+.dgo.fl .dgi{animation:dgflip3 .78s cubic-bezier(.65,0,.35,1) forwards,dglift3 .78s cubic-bezier(.45,0,.55,1) forwards}
+#dg.fast .dgo.fl .dgi{animation-duration:.3s,.3s}
+.dgo::before,.dgo.chg::before{opacity:0;transition:none;animation:none}
+.dgo.fl::before{opacity:.75;transition:opacity .6s ease .7s;animation:dgpl 3.2s ease-in-out 1.4s infinite}
+/* chữ hiện ngay khi mặt trước vừa quay ra (khoảng giữa cú lật) */
+.dgo.fl .dgfr>:nth-child(1){animation-delay:.36s}
+.dgo.fl .dgL>:nth-child(1){animation-delay:.38s}.dgo.fl .dgL>:nth-child(3){animation-delay:.46s}
+.dgo.fl .dgR>:nth-child(1){animation-delay:.48s}.dgo.fl .dgR>:nth-child(2){animation-delay:.54s}.dgo.fl .dgR>:nth-child(3){animation-delay:.6s}
+.dgo.fl .dgL>*,.dgo.fl .dgR>*,.dgo.fl .dgfr>*{animation-duration:.45s}
+.dgo.fl .dgfr .dgw{animation:dgzoom .7s cubic-bezier(.2,.9,.3,1) .36s both}
+#dg.land .dgo.fl .dgfr>.dgdiv{animation:dgdv .7s cubic-bezier(.2,.9,.3,1) .4s both}
+@media (prefers-reduced-motion:reduce){.dgo.fl .dgi,.dgo.chg .dgi{animation:none!important;transform:rotateY(180deg)}}
+
+/* mặt trước quay ra là thấy chữ luôn (giống lật lá bài thật), không bắt từng dòng hiện dần cùng lúc với cú lật */
+.dgo.fl .dgfr>*,.dgo.fl .dgL>*,.dgo.fl .dgR>*{animation:none}
+.dgo.fl .dgfr .dgw{animation:dgzoom4 .6s cubic-bezier(.2,.9,.3,1) .3s both}
+@keyframes dgzoom4{from{opacity:.2;transform:scale(.82)}60%{opacity:1;transform:scale(1.05)}to{opacity:1;transform:scale(1)}}
+#dg.fast .dgo.fl .dgfr .dgw{animation:none}
 </style>
 </head>
 <body>
@@ -2983,10 +3010,10 @@ function dgReveal(d,rc){
   o.style.transition='transform '+dgT(.7,.22)+'s cubic-bezier(.2,.85,.25,1)';
   o.style.transform='translate(0,0) scale(1,1) rotate(0deg)';
   /* chuẩn bị sẵn lớp vẽ của cả hai mặt TRƯỚC khi lật, để lúc lật iPad không phải vẽ lại cả lá bài */
-  dgLater(function(){o.classList.add('warm','chg');dgSfx('charge');dgFx(o,h,dgT(330,90))},dgT(650,150));
-  dgLater(function(){o.classList.add('fl');dgSfx('flip')},dgT(980,240));
+  dgLater(function(){o.classList.add('warm','chg');dgSfx('charge');dgFx(o,h,dgT(250,90))},dgT(650,150));
+  dgLater(function(){o.classList.add('fl');dgSfx('flip')},dgT(900,240));
   dgLater(function(){var b=o.getBoundingClientRect();dgBurst(b.left+b.width/2,b.top+b.height*.4,60,h)},dgT(1500,400));
-  dgLater(function(){o.classList.remove('chg');dgReady=true;dgPhase='card';dgBot('card');dgAutoCard()},dgT(1700,560));
+  dgLater(function(){o.classList.remove('chg');dgReady=true;dgPhase='card';dgBot('card');dgAutoCard()},dgT(1650,560));
 }
 /* ---------- vuốt thẻ sang bên để bốc lá khác ---------- */
 function dgNext(dx,dy){
