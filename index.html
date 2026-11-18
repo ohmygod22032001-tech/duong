@@ -479,6 +479,10 @@ input,select,textarea{font-size:16px}
 
 /* nút tự hiện mặt sau */
 @media (max-width:380px){.acts{gap:6px}.acts button{width:42px;height:42px;font-size:20px}}
+
+/* làm nổi từ đang học trong câu ví dụ */
+mark.hl{background:rgba(255,205,60,.28);background:color-mix(in srgb,currentColor 22%,transparent);color:inherit;font-style:normal;font-weight:900;padding:0 .18em;margin:0 .03em;border-radius:.3em;box-shadow:inset 0 -.15em 0 currentColor;-webkit-box-decoration-break:clone;box-decoration-break:clone;text-decoration:none}
+.exs mark.hl,#study:not([data-th]) .card mark.hl{color:var(--fg)}
 </style>
 </head>
 <body>
@@ -528,6 +532,35 @@ function load(){try{var d=localStorage.getItem('vocab-v1');if(d)S=JSON.parse(d)}
 function save(nopush){try{localStorage.setItem('vocab-v1',JSON.stringify(S))}catch(e){}if(!nopush)schedSync()}
 function uid(){return Math.random().toString(36).slice(2,9)}
 function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
+function hlEx(d){
+  var t=String(d.e==null?'':d.e),w=String(d.w==null?'':d.w);
+  if(!t||!w)return esc(t);
+  var zh=/[\u3400-\u9fff]/.test(w),base=w.replace(/⭐/g,'').replace(/\s*\([^)]*\)\s*/g,' ').trim(),c=[],seen={};
+  function add(x){x=(x||'').trim();if(x&&!seen[x]){seen[x]=1;c.push(x)}}
+  base.split(/\s*[\/,;、]\s*/).forEach(function(p){
+    add(p.replace(/[（）]/g,''));
+    add(p.replace(/（[^）]*）/g,''));
+    add(p.replace(/[（）]/g,'').replace(/儿$/,''));
+    p.split(/[…~～·]+/).forEach(function(q){add(q.replace(/[（）]/g,''));add(q.replace(/（[^）]*）/g,''))});
+  });
+  c.sort(function(a,b){return b.length-a.length});
+  var R=[];
+  function find(x,flags){
+    var re=new RegExp(x.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'),flags),m,out=[];
+    while((m=re.exec(t))){out.push([m.index,m.index+m[0].length]);if(!m[0].length)re.lastIndex++}
+    return out;
+  }
+  for(var k=0;k<c.length&&!R.length;k++)R=find(c[k],zh?'g':'gi');
+  if(!R.length&&zh){
+    var chars={};Array.from(base.replace(/[（）]/g,'')).forEach(function(ch){if(/[\u3400-\u9fff]/.test(ch))chars[ch]=1});
+    Object.keys(chars).forEach(function(ch){R=R.concat(find(ch,'g'))});
+  }
+  if(!R.length)return esc(t);
+  R.sort(function(a,b){return a[0]-b[0]||b[1]-a[1]});
+  var M=[];R.forEach(function(r){var l=M[M.length-1];if(l&&r[0]<=l[1])l[1]=Math.max(l[1],r[1]);else M.push([r[0],r[1]])});
+  var o='',p=0;M.forEach(function(r){o+=esc(t.slice(p,r[0]))+'<mark class="hl">'+esc(t.slice(r[0],r[1]))+'</mark>';p=r[1]});
+  return o+esc(t.slice(p));
+}
 
 /* ---------- library ---------- */
 function listRow(l){var ic=(l.words.filter(function(w){return w.i})[0]||{}).i||((l.words[0]||{w:'+'}).w).charAt(0);return '<div class="list"><div class="bd" style="--h:'+hue(l.name)+'">'+esc(ic)+'</div><div class="t"><b>'+esc(l.name)+'</b><span>'+l.words.length+' từ · '+(l.lang==='zh'?'Tiếng Trung':'Tiếng Anh')+'</span></div><button class="btn sm pri" onclick="study(\'list\',\''+l.id+'\')">Ôn</button><button class="btn sm" onclick="openWords(\''+l.id+'\')">Xem</button><button class="x" onclick="del(this,\'list\',\''+l.id+'\')">Xóa</button></div>'}
@@ -609,7 +642,7 @@ function cardHTML(d,k){
   var h=hue(d.w),ic=d.i?'<div class="ico">'+esc(d.i)+'</div>':'';
   return '<div class="card" data-k="'+k+'" style="--h:'+h+'"><span class="tag ok">ĐÃ THUỘC</span><span class="tag no">ÔN LẠI</span>'+
   '<i class="tb"></i><button class="say" onclick="speak(event)" aria-label="Đọc to">🔊</button><button class="say star'+(d.r&&d.r.s?' on':'')+'" style="top:66px" onclick="starCur(event,this)" aria-label="Đánh dấu từ khó">'+(d.r&&d.r.s?'★':'☆')+'</button>'+ic+wordHTML(d)+(d.p?'<div class="p">'+esc(d.p)+'</div>':'')+
-  (d.m?'<div class="m'+(cfg.hide?'':' show')+'">'+esc(d.m)+'</div>':'')+(d.e?'<div class="e">'+esc(d.e)+'</div>':'')+((d.e||(d.r&&d.r.x))?'<div class="cx">'+(d.e?'<button onclick="speakEx(event)">🔊 Đọc câu</button>':'')+(d.r&&d.r.x?'<span>đã sai '+d.r.x+' lần</span>':'')+'</div>':'')+'</div>';
+  (d.m?'<div class="m'+(cfg.hide?'':' show')+'">'+esc(d.m)+'</div>':'')+(d.e?'<div class="e">'+hlEx(d)+'</div>':'')+((d.e||(d.r&&d.r.x))?'<div class="cx">'+(d.e?'<button onclick="speakEx(event)">🔊 Đọc câu</button>':'')+(d.r&&d.r.x?'<span>đã sai '+d.r.x+' lần</span>':'')+'</div>':'')+'</div>';
 }
 function rev(el){el.classList.toggle('show')}
 function place(){
@@ -1462,7 +1495,7 @@ function updPanels(){
   var b=Math.min(6,(r&&r.b)||0),lv='',i;for(i=1;i<=6;i++)lv+='<i'+(i<=b?' class="on"':'')+'></i>';
   var nx=!r||!r.d?'chưa ôn lần nào':(r.d<=Date.now()?'ôn kế tiếp: hôm nay':'ôn kế tiếp: '+new Date(r.d).toLocaleDateString('vi-VN',{day:'numeric',month:'numeric'}));
   var h='<h4>Mức thành thạo</h4><div class="lv">'+lv+'</div><small class="gh">Cấp '+b+'/6 · '+nx+'</small>';
-  if(d.e)h+=cfg.ex!==false?'<h4>Câu ví dụ <button class="mini" onclick="togEx()">Ẩn</button></h4><div class="exs">'+esc(d.e)+'</div><button class="mini" onclick="speakEx(event)">🔊 Đọc cả câu</button>':'<h4>Câu ví dụ <button class="mini" onclick="togEx()">Hiện</button></h4>';
+  if(d.e)h+=cfg.ex!==false?'<h4>Câu ví dụ <button class="mini" onclick="togEx()">Ẩn</button></h4><div class="exs">'+hlEx(d)+'</div><button class="mini" onclick="speakEx(event)">🔊 Đọc cả câu</button>':'<h4>Câu ví dụ <button class="mini" onclick="togEx()">Hiện</button></h4>';
   var us=(r&&r.u)||USAGE[d.w];if(us)h+='<h4>Cách dùng</h4><div class="exs">'+esc(us)+'</div>';
   var rel=[];
   if(r){var lst=S.lists.filter(function(l){return l.words.indexOf(r)>-1})[0];
@@ -1558,7 +1591,7 @@ cardHTML=function(d,k){
   return '<div class="card fl" data-k="'+k+'" style="--h:'+h+'"><span class="tag ok">ĐÃ THUỘC</span><span class="tag no">ÔN LẠI</span><i class="tb"></i>'+
     '<button class="say" onclick="speak(event)" aria-label="Đọc to">🔊</button><button class="say star'+(st?' on':'')+'" style="top:66px" onclick="starCur(event,this)" aria-label="Đánh dấu từ khó">'+(st?'★':'☆')+'</button>'+
     '<div class="fc">'+ic+wordHTML(d)+P+'<div class="fh">↻ Chạm để lật thẻ</div></div>'+
-    '<div class="bc"><div class="bw">'+esc(d.w)+'</div>'+P+(d.m?'<div class="m show">'+esc(d.m)+'</div>':'<div class="m show mz">Chưa có nghĩa</div>')+(d.e?'<div class="e">'+esc(d.e)+'</div>':'')+cx+'</div></div>';
+    '<div class="bc"><div class="bw">'+esc(d.w)+'</div>'+P+(d.m?'<div class="m show">'+esc(d.m)+'</div>':'<div class="m show mz">Chưa có nghĩa</div>')+(d.e?'<div class="e">'+hlEx(d)+'</div>':'')+cx+'</div></div>';
 };
 function flipCard(c,to,instant){
   if(!c||!c.classList.contains('fl'))return;
