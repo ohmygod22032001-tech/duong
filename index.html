@@ -901,6 +901,34 @@ background:rgba(22,12,52,.84);-webkit-backdrop-filter:blur(18px);backdrop-filter
 #study[data-th=sw] .card .fc,#study[data-th=sw] .card .bc{text-shadow:none}
 #study[data-th=sw] .card{background-image:repeating-linear-gradient(0deg,rgba(255,255,255,.035) 0 1px,transparent 1px 3px),radial-gradient(circle at 50% 42%,rgba(255,79,216,.3),transparent 38%),radial-gradient(circle at 50% 0,rgba(255,79,216,.28),transparent 58%),radial-gradient(circle at 50% 100%,rgba(124,243,255,.16),transparent 55%),linear-gradient(160deg,#1c0634,#080218)}
 #study[data-th=sm] .card .fc::before{content:"";position:absolute;left:50%;top:42%;width:60%;aspect-ratio:1;translate:-50% -50%;border-radius:50%;background:radial-gradient(circle,rgba(255,190,80,.16),transparent 65%);pointer-events:none;z-index:-1}
+
+/* ===== ⚡ TỐI ƯU HIỆU NĂNG BỐC THẺ (iPad) =====
+   chỉ dùng hiệu ứng chạy trên GPU (transform/opacity), bỏ blur/blend/filter thay đổi liên tục */
+#dg{background:
+ radial-gradient(40% 34% at 22% 26%,rgba(124,58,237,.42),transparent 70%),
+ radial-gradient(34% 30% at 80% 22%,rgba(6,182,212,.22),transparent 70%),
+ radial-gradient(38% 34% at 74% 76%,rgba(236,72,153,.28),transparent 70%),
+ radial-gradient(30% 28% at 20% 80%,rgba(245,158,11,.14),transparent 70%),
+ radial-gradient(120% 90% at 50% 38%,#2b0f63 0%,#0e0828 55%,#05030f 100%)}
+.dgaur{display:none}
+#dg::after{animation:none;opacity:.5}
+.dgrune{filter:none;opacity:.85}
+.dgrune .rl{position:absolute;inset:0;will-change:transform}
+.dgrune .rl1{animation:dgrot 46s linear infinite}
+.dgrune .rl2{animation:dgrot 30s linear infinite reverse}
+.dgrune svg circle,.dgrune svg polygon{vector-effect:non-scaling-stroke}
+.dgk{will-change:transform,opacity}
+.dgk::after{filter:none;background:radial-gradient(ellipse,hsl(var(--hh,270) 100% 68%/.45),transparent 68%)}
+.dgk .bk::after{inset:0;background:linear-gradient(115deg,transparent 38%,rgba(255,255,255,.28) 50%,transparent 62%);background-size:auto;mix-blend-mode:normal;transform:translateX(-120%);animation:dgsh2 3.4s linear infinite;animation-delay:var(--d,0s);will-change:transform}
+@keyframes dgsh2{to{transform:translateX(120%)}}
+.dgfr::after{inset:0;background:linear-gradient(110deg,transparent 40%,rgba(255,255,255,.14) 50%,transparent 60%);background-size:auto;mix-blend-mode:normal;transform:translateX(-110%);animation:dgsh2 4.5s linear infinite;will-change:transform}
+.dgo.fl .dgfr{animation:none}
+.dgo::before{animation:dgpl 3.2s ease-in-out infinite;filter:blur(14px);will-change:opacity}
+.dgo.fl::before{opacity:.75}
+@keyframes dgpl{50%{opacity:.4}}
+.dgo:not(.fl)::before{animation:none}
+#dgst::before,.dgow:not(:empty)::before{will-change:transform,opacity}
+@media (prefers-reduced-motion:reduce){.dgrune .rl,.dgk .bk::after,.dgfr::after,.dgo::before{animation:none!important}}
 </style>
 </head>
 <body>
@@ -2246,7 +2274,7 @@ loop=async function(){
 
 /* ---------- nghiêng thẻ theo con quay hồi chuyển (và theo chuột) ---------- */
 var TL={x:0,y:0,tx:0,ty:0,b:null,on:false,raf:0,perm:false,ls:false,warned:false};
-function tiltOK(){return cfg.tilt!==false&&!RM()}
+function tiltOK(){return false}   /* đã tắt hẳn: thẻ không nghiêng theo máy/chuột nữa */
 function oriAngle(){var a=(screen.orientation&&typeof screen.orientation.angle==='number')?screen.orientation.angle:(window.orientation||0);return ((a%360)+360)%360}
 function onOri(e){
   if(!TL.on||e.beta==null||e.gamma==null)return;
@@ -2539,7 +2567,6 @@ openCfg=function(){
   var last=$('sheet').lastElementChild;if(!last)return;
   last.insertAdjacentHTML('beforebegin',
     '<label>Cách xem nghĩa</label><div><button class="thc fmb" data-k="flip" onclick="setFm(\'flip\')">🔄 Lật thẻ 3D</button><button class="thc fmb" data-k="blur" onclick="setFm(\'blur\')">🌫 Làm mờ nghĩa</button></div>'+
-    '<label class="chk"><input type="checkbox" '+(cfg.tilt!==false?'checked':'')+' onchange="setTilt(this.checked)">Thẻ nghiêng theo máy (con quay hồi chuyển) hoặc theo chuột, có vệt sáng hologram</label>'+
     '<label class="chk"><input type="checkbox" '+(cfg.cpitch!==false?'checked':'')+' onchange="setC(\'cpitch\',this.checked)">Tiếng “ting” cao dần theo combo đúng liên tiếp</label>');
   applyFm();
 };
@@ -2774,13 +2801,16 @@ function dgBot(m){
   else b.innerHTML='';
 }
 function dgRune(){
+  if($('dgrune').firstChild)return;
   var B=['乾','兌','離','震','巽','坎','艮','坤'],E=['金','木','水','火','土'],s='<svg viewBox="0 0 400 400" aria-hidden="true"><g class="r1"><circle cx="200" cy="200" r="196" fill="none" stroke="#d9b8ff" stroke-width="1.5"/><circle cx="200" cy="200" r="172" fill="none" stroke="#f6d27a" stroke-width="1" stroke-dasharray="3 7"/>';
   B.forEach(function(c,i){s+='<text x="200" y="42" transform="rotate('+(i*45)+' 200 200)">'+c+'</text>'});
   s+='</g><g class="r2"><circle cx="200" cy="200" r="128" fill="none" stroke="#ff9bf0" stroke-width="1.5"/><circle cx="200" cy="200" r="70" fill="none" stroke="#7cd6ff" stroke-width="1" stroke-dasharray="2 6"/>';
   var pts=[0,1,2,3,4].map(function(k){var a=(-90+k*144)*Math.PI/180;return (200+124*Math.cos(a)).toFixed(1)+','+(200+124*Math.sin(a)).toFixed(1)}).join(' ');
   s+='<polygon points="'+pts+'" fill="none" stroke="#ffd86b" stroke-width="1.5"/>';
   E.forEach(function(c,k){var a=(-90+k*72)*Math.PI/180;s+='<text x="'+(200+100*Math.cos(a)).toFixed(1)+'" y="'+(207+100*Math.sin(a)).toFixed(1)+'">'+c+'</text>'});
-  $('dgrune').innerHTML=s+'</g></svg>';
+  s+='</g></svg>';
+  var a=s.indexOf('<g class="r2">'),hd='<svg viewBox="0 0 400 400" aria-hidden="true">';
+  $('dgrune').innerHTML='<div class="rl rl1">'+s.slice(0,a).replace('<g class="r1">','<g>')+'</svg></div><div class="rl rl2">'+hd+s.slice(a).replace('<g class="r2">','<g>')+'</div>';
 }
 function dgLand(){return innerWidth>=640&&innerWidth>innerHeight*1.15}
 function dgSize(){
@@ -2792,10 +2822,10 @@ function dgSize(){
   dgR=Math.max(cw*1.2,(cw*1.06)/(2*Math.tan(Math.PI/K)));
 }
 function dgCanvas(){
-  var c=$('dgc'),D=Math.min(window.devicePixelRatio||1,2);
+  var c=$('dgc'),D=Math.min(window.devicePixelRatio||1,dgW*dgH>900000?1:2);
   c.width=Math.round(dgW*D);c.height=Math.round(dgH*D);
   dgCtx=c.getContext('2d');dgCtx.setTransform(D,0,0,D,0,0);
-  if(!dgP.length){var n=dgRM()?0:(dgW<520?45:dgW>=1000?120:80);for(var i=0;i<n;i++)dgP.push(dgNewP(true))}
+  if(!dgP.length){var n=dgRM()?0:(dgW<520?40:dgW>=1000?70:60);for(var i=0;i<n;i++)dgP.push(dgNewP(true))}
 }
 window.addEventListener('resize',function(){if(dgOn){dgSize();dgCanvas()}});
 window.addEventListener('orientationchange',function(){setTimeout(function(){if(dgOn){dgSize();dgCanvas()}},350)});
@@ -2803,7 +2833,7 @@ window.addEventListener('orientationchange',function(){setTimeout(function(){if(
 function dgBuild(){
   var K=Math.min(dgQ.length,dgLand()&&innerWidth>=1000?11:innerWidth<520?7:9),G=['✦','☯','☾','✧','❖','✺','☼'],h='';
   dgSlots=dgQ.slice(0,K);
-  for(var i=0;i<K;i++)h+='<div class="dgk" data-i="'+i+'" style="--d:'+(-i*.45).toFixed(2)+'s"><div class="bk"><i class="cn a">✦</i><i class="sg">'+G[i%G.length]+'</i><i class="cn b">✦</i></div></div>';
+  var hb=Math.random()*360;for(var i=0;i<K;i++)h+='<div class="dgk" data-i="'+i+'" style="--d:'+(-i*.45).toFixed(2)+'s;--hh:'+((hb+i*360/K)%360).toFixed(0)+'"><div class="bk"><i class="cn a">✦</i><i class="sg">'+G[i%G.length]+'</i><i class="cn b">✦</i></div></div>';
   $('dgring').innerHTML=h;dgSize();
 }
 function dgFrame(ts){
@@ -2818,8 +2848,7 @@ function dgFrame(ts){
   for(var i=0;i<K;i++){
     var el=els[i],a=dgAng+i*step,c=Math.cos(a*Math.PI/180),bob=Math.sin(ts/650+i*1.4)*7;
     el.style.transform='translateY('+bob.toFixed(1)+'px) rotateY('+a.toFixed(2)+'deg) translateZ('+R.toFixed(1)+'px) scale('+sc.toFixed(3)+')';
-    el.style.opacity=(dgRA*(.4+.6*(c+1)/2)).toFixed(3);el.style.filter='brightness('+(.62+.55*(c+1)/2).toFixed(2)+') saturate('+(.85+.3*(c+1)/2).toFixed(2)+')';
-    if(hh)el.style.setProperty('--hh',((dgHue+i*(360/V))%360).toFixed(0));
+    el.style.opacity=(dgRA*(.32+.68*(c+1)/2)).toFixed(3);
   }
   dgParticles(f);
 }
