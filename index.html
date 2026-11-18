@@ -1022,6 +1022,14 @@ background:rgba(22,12,52,.84);-webkit-backdrop-filter:blur(18px);backdrop-filter
 .dgo.fl .dgfr .dgw{animation:dgzoom4 .6s cubic-bezier(.2,.9,.3,1) .3s both}
 @keyframes dgzoom4{from{opacity:.2;transform:scale(.82)}60%{opacity:1;transform:scale(1.05)}to{opacity:1;transform:scale(1)}}
 #dg.fast .dgo.fl .dgfr .dgw{animation:none}
+
+/* sửa "nhảy" ở cuối cú lật: lá bài cũ còn một chuyển tiếp (transition) 0,8s chạy ngầm bên dưới hiệu ứng lật.
+   Trên Safari/iPad, khi hiệu ứng lật vừa kết thúc, phần chuyển tiếp còn dở lộ ra -> thẻ nghiêng lại rồi mới đứng yên.
+   Bỏ hẳn chuyển tiếp đó; sau khi lật xong khóa thẻ ở trạng thái cuối, không còn hiệu ứng nào trên lớp xoay. */
+.dgi,.dgo.warm .dgi,.dgo.fl .dgi{transition:none!important}
+.dgo.warm .dgi{transform:none}
+.dgo.fl .dgi{transform:rotateY(180deg)}
+.dgo.fl.done .dgi{animation:none!important;transform:rotateY(180deg);scale:1}
 </style>
 </head>
 <body>
@@ -3011,7 +3019,7 @@ function dgReveal(d,rc){
   o.style.transform='translate(0,0) scale(1,1) rotate(0deg)';
   /* chuẩn bị sẵn lớp vẽ của cả hai mặt TRƯỚC khi lật, để lúc lật iPad không phải vẽ lại cả lá bài */
   dgLater(function(){o.classList.add('warm','chg');dgSfx('charge');dgFx(o,h,dgT(250,90))},dgT(650,150));
-  dgLater(function(){o.classList.add('fl');dgSfx('flip')},dgT(900,240));
+  dgLater(function(){o.classList.add('fl');dgSfx('flip');var i=o.querySelector('.dgi');if(i)i.addEventListener('animationend',function(ev){if(ev.target===i&&ev.animationName==='dgflip3')o.classList.add('done')})},dgT(900,240));
   dgLater(function(){var b=o.getBoundingClientRect();dgBurst(b.left+b.width/2,b.top+b.height*.4,60,h)},dgT(1500,400));
   dgLater(function(){o.classList.remove('chg');dgReady=true;dgPhase='card';dgBot('card');dgAutoCard()},dgT(1650,560));
 }
